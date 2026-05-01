@@ -4,4 +4,4 @@ Private enterprise intranet platform on Azure built with a Hub-and-Spoke archite
 
 
 # Architecture
-![arquitectura](./docs/arquitectura/azure_intranet_hubspoke.**png**)
+![arquitectura](./docs/arquitectura/azure_intranet_hubspoke.png)
