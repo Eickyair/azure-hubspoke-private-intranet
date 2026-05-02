@@ -1,0 +1,59 @@
+---
+title: Diagrama 1 - Hub VNet
+---
+%%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 50, "rankSpacing": 65}, "themeVariables": {"fontFamily": "Trebuchet MS", "fontSize": "13px"}} }%%
+flowchart TB
+    title["Diagrama 1 - Hub VNet<br/>Conectividad y servicios compartidos"]:::title
+    legend["Leyenda<br/>Verde = recurso del Hub<br/>Caja gris = contenedor de red<br/>Bloque suelto = dependencia externa con color del modulo origen<br/>Rojo = servicio externo real<br/>Linea solida = trafico principal<br/>Linea punteada = control o servicio compartido"]:::legend
+    title --- legend
+
+    subgraph hubvnet["Hub VNet 10.10.0.0/16"]
+        direction LR
+        subgraph gwsubnet["GatewaySubnet 10.10.0.0/24"]
+            direction TB
+            vpn["vpn-gw-hub-01<br/>Azure VPN Gateway<br/>Pool P2S 172.16.10.0/24"]:::hub
+        end
+
+        subgraph bastionsubnet["AzureBastionSubnet 10.10.1.0/26"]
+            direction TB
+            bastion["bastion-hub-01<br/>Azure Bastion<br/>IP privada 10.10.1.4"]:::hub
+        end
+
+        subgraph edgesubnet["EdgeSubnet 10.10.2.0/24"]
+            direction TB
+            agw["agw-hub-private<br/>Application Gateway WAF<br/>IP privada 10.10.2.10<br/>Hosts: intranet.northwind.lab / admin.northwind.lab"]:::hub
+        end
+
+        shared["Servicios compartidos del Hub<br/>Private DNS Zones<br/>privatelink.azurewebsites.net<br/>privatelink.mysql.database.azure.com<br/>privatelink.blob.core.windows.net<br/>Key Vault: kv-intranet.privatelink.vaultcore.azure.net<br/>Azure Monitor + Log Analytics"]:::hub
+    end
+
+    laptops["Laptops del equipo<br/>Clientes P2S"]:::external
+    spoke1["[Spoke 1] WebApps privadas"]:::app
+    spoke2["[Spoke 2] Datos privados"]:::data
+    spoke3["[Spoke 3] ETL y dashboard"]:::analytics
+
+    laptops -->|"SSL VPN :443 / IKEv2"| vpn
+    vpn -->|"Rutas privadas por peering"| spoke1
+    vpn -->|"Rutas privadas por peering"| spoke2
+    vpn -->|"Rutas privadas por peering"| spoke3
+    agw -->|"HTTPS :443"| spoke1
+    shared -.->|"DNS+KV :443"| spoke1
+    shared -.->|"DNS :53/443"| spoke2
+    shared -.->|"DNS+Mon :443"| spoke3
+    bastion -.->|"Mgmt :443"| spoke3
+
+    spoke1 ~~~ spoke2
+    spoke2 ~~~ spoke3
+
+    style hubvnet fill:#f8fafc,stroke:#2e7d32,stroke-width:2px;
+    style gwsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style bastionsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style edgesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+
+    classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;
+    classDef legend fill:#f8fafc,stroke:#94a3b8,color:#334155;
+    classDef hub fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px;
+    classDef app fill:#e3f2fd,stroke:#1565c0,color:#0d47a1,stroke-width:2px;
+    classDef data fill:#fff8e1,stroke:#b28704,color:#6d4c00,stroke-width:2px;
+    classDef analytics fill:#f3e5f5,stroke:#8e24aa,color:#4a148c,stroke-width:2px;
+    classDef external fill:#ffebee,stroke:#c62828,color:#7f1d1d,stroke-width:2px;

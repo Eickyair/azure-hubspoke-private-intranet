@@ -22,6 +22,7 @@ La arquitectura propuesta mantiene el patron Hub-Spoke del caso de estudio y lo 
 | WebApp Intranet | Azure App Service con Django + Jinja2 | Portal principal para empleados. Permite consultar informacion interna, cargar formularios y visualizar documentos. |
 | WebApp Administracion | Azure App Service con Django Admin | Portal restringido para el equipo administrativo o TI. Sirve para gestion de catalogos, revisiones operativas y soporte interno. |
 | API privada | Azure App Service con FastAPI + Uvicorn | Capa de negocio desacoplada del frontend. Atiende autenticacion, consultas, operaciones CRUD y acceso controlado a datos y documentos. |
+| Private Endpoints Web | Azure Private Endpoint + Private DNS | Publica la intranet, el portal administrativo y la API solo por red privada y con resolucion interna consistente. |
 
 ## Spoke 2 - Datos y documentos
 
@@ -36,9 +37,10 @@ La arquitectura propuesta mantiene el patron Hub-Spoke del caso de estudio y lo 
 
 | Servicio | Tecnologia | Funcion |
 | --- | --- | --- |
-| Proceso ETL Python | Python programado | Extrae datos desde las dos bases MySQL, los transforma y prepara tablas para analitica. |
+| Proceso ETL Python | VM Linux privada con Python programado | Extrae datos desde las dos bases MySQL, los transforma y prepara tablas para analitica. Se administra de forma segura mediante Bastion. |
 | MySQL Analytics DB | Azure Database for MySQL | Base orientada a reporting y KPIs. Recibe informacion consolidada desde la capa ETL. |
-| Dashboard interno | Streamlit | Expone indicadores y tableros para supervision administrativa sin consultar directamente las bases operativas. |
+| Private Endpoint Analytics | Azure Private Endpoint | Expone la base analitica de MySQL solo por red privada dentro del spoke de analitica. |
+| Dashboard interno | VM Linux privada con Streamlit | Expone indicadores y tableros para supervision administrativa sin consultar directamente las bases operativas. Se publica solo dentro de la red privada. |
 
 ## Flujo principal de la solucion
 
@@ -46,8 +48,8 @@ La arquitectura propuesta mantiene el patron Hub-Spoke del caso de estudio y lo 
 2. El trafico web entra por `Application Gateway WAF` y se redirige a la `WebApp Intranet` o a la `WebApp Administracion`.
 3. Las webapps consumen la `API privada` en FastAPI para ejecutar la logica de negocio.
 4. La API guarda y consulta informacion en `MySQL App DB`, `MySQL Admin DB` y `Storage Account Privado` usando endpoints privados.
-5. El modulo ETL toma informacion de ambas bases operativas y la carga en `MySQL Analytics DB`.
-6. El `Dashboard interno` consulta la base analitica para mostrar indicadores al equipo administrativo.
+5. El modulo ETL, ejecutado en una VM privada del Spoke 3, toma informacion de ambas bases operativas y la carga en `MySQL Analytics DB` mediante un endpoint privado.
+6. El `Dashboard interno`, publicado en una VM privada con Streamlit, consulta la base analitica para mostrar indicadores al equipo administrativo.
 7. Todos los servicios envian logs y metricas a `Azure Monitor + Log Analytics`.
 
 ## Justificacion de diseno

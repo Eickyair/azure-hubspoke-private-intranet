@@ -1,0 +1,64 @@
+---
+title: Diagrama 2 - Spoke 1 / Aplicaciones
+---
+%%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 52, "rankSpacing": 68}, "themeVariables": {"fontFamily": "Trebuchet MS", "fontSize": "13px"}} }%%
+flowchart TB
+    title["Diagrama 2 - Spoke 1 / Aplicaciones<br/>Web privada y API"]:::title
+    legend["Leyenda<br/>Azul = recurso del modulo<br/>Caja gris = contenedor de red<br/>Bloque suelto = dependencia externa con color del modulo origen<br/>Rojo = servicio externo real<br/>Linea solida = trafico principal<br/>Linea punteada = control o resolucion"]:::legend
+    title --- legend
+
+    subgraph spoke1["Spoke 1 VNet 10.20.0.0/16"]
+        direction LR
+        subgraph appsubnet["AppServiceIntegrationSubnet 10.20.1.0/24"]
+            direction TB
+            portal["web-intranet<br/>Django + Jinja2<br/>https://intranet.northwind.lab"]:::app
+            adminapp["web-admin<br/>Django Admin<br/>https://admin.northwind.lab"]:::app
+            api["api-private<br/>FastAPI + Uvicorn<br/>https://api.northwind.lab"]:::app
+        end
+
+        subgraph pesubnet["PrivateEndpointSubnet 10.20.2.0/24"]
+            direction TB
+            peportal["pe-intranet-web<br/>10.20.2.10<br/>intranet-web.privatelink.azurewebsites.net"]:::app
+            peadmin["pe-admin-web<br/>10.20.2.11<br/>admin-web.privatelink.azurewebsites.net"]:::app
+            peapi["pe-api-web<br/>10.20.2.12<br/>api-web.privatelink.azurewebsites.net"]:::app
+        end
+    end
+
+    agw["[Hub] agw-hub-private<br/>10.10.2.10"]:::hub
+    kv["[Hub] kv-intranet<br/>kv-intranet.privatelink.vaultcore.azure.net"]:::hub
+    dbapp["[Spoke 2] mysql-app-db<br/>mysql-app.privatelink.mysql.database.azure.com"]:::data
+    dbadmin["[Spoke 2] mysql-admin-db<br/>mysql-admin.privatelink.mysql.database.azure.com"]:::data
+    blob["[Spoke 2] stnorthwinddocs<br/>stnorthwinddocs.privatelink.blob.core.windows.net"]:::data
+    smtp["[Ext] smtp.northwind.example"]:::external
+
+    agw -->|"HTTPS :443"| peportal
+    agw -->|"HTTPS :443"| peadmin
+    peportal -.->|"PrivLink"| portal
+    peadmin -.->|"PrivLink"| adminapp
+    peapi -.->|"PrivLink"| api
+    portal -->|"HTTPS :443"| peapi
+    adminapp -->|"HTTPS :443"| peapi
+    api -->|"MySQL :3306"| dbapp
+    adminapp -->|"MySQL :3306"| dbadmin
+    api -->|"MySQL :3306"| dbadmin
+    api -->|"HTTPS :443"| blob
+    api -.->|"Secrets :443"| kv
+    api -->|"SMTP :587"| smtp
+
+    agw ~~~ kv
+    kv ~~~ dbapp
+    dbapp ~~~ dbadmin
+    dbadmin ~~~ blob
+    blob ~~~ smtp
+
+    style spoke1 fill:#f8fafc,stroke:#1565c0,stroke-width:2px;
+    style appsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style pesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+
+    classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;
+    classDef legend fill:#f8fafc,stroke:#94a3b8,color:#334155;
+    classDef hub fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px;
+    classDef app fill:#e3f2fd,stroke:#1565c0,color:#0d47a1,stroke-width:2px;
+    classDef data fill:#fff8e1,stroke:#b28704,color:#6d4c00,stroke-width:2px;
+    classDef analytics fill:#f3e5f5,stroke:#8e24aa,color:#4a148c,stroke-width:2px;
+    classDef external fill:#ffebee,stroke:#c62828,color:#7f1d1d,stroke-width:2px;

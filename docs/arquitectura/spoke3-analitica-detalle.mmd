@@ -1,0 +1,63 @@
+---
+title: Diagrama 4 - Spoke 3 / Analitica
+---
+%%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 55, "rankSpacing": 72}, "themeVariables": {"fontFamily": "Trebuchet MS", "fontSize": "13px"}} }%%
+flowchart TB
+    title["Diagrama 4 - Spoke 3 / Analitica<br/>ETL y dashboard interno"]:::title
+    legend["Leyenda<br/>Morado = recurso del modulo<br/>Caja gris = contenedor de red<br/>Bloque suelto = dependencia externa con color del modulo origen<br/>Rojo = servicio externo real<br/>Linea solida = trafico principal<br/>Linea punteada = observabilidad o gestion"]:::legend
+    title --- legend
+
+    subgraph spoke3["Spoke 3 VNet 10.40.0.0/16"]
+        direction LR
+        subgraph etlsubnet["EtlSubnet 10.40.1.0/24"]
+            direction TB
+            etl["etl-runner-01<br/>Python ETL<br/>10.40.1.20"]:::analytics
+        end
+
+        subgraph dashboardsubnet["DashboardSubnet 10.40.2.0/24"]
+            direction TB
+            dashboard["dashboard-kpi-01<br/>Streamlit<br/>10.40.2.20<br/>https://kpi.northwind.lab"]:::analytics
+        end
+
+        subgraph pesubnet["PrivateEndpointSubnet 10.40.3.0/24"]
+            direction TB
+            peanalytics["pe-mysql-analytics<br/>10.40.3.10<br/>mysql-analytics.privatelink.mysql.database.azure.com"]:::analytics
+        end
+
+        analyticsdb["MySQL Analytics DB<br/>mysql-analytics.privatelink.mysql.database.azure.com"]:::analytics
+    end
+
+    dbapp["[Spoke 2] mysql-app-db"]:::data
+    dbadmin["[Spoke 2] mysql-admin-db"]:::data
+    vpnusers["[Hub] Usuarios por VPN P2S"]:::hub
+    monitor["[Hub] Azure Monitor + Log Analytics"]:::hub
+    bastion["[Hub] Azure Bastion"]:::hub
+
+    etl -->|"MySQL :3306"| dbapp
+    etl -->|"MySQL :3306"| dbadmin
+    etl -->|"MySQL :3306"| peanalytics
+    peanalytics -.->|"PrivLink"| analyticsdb
+    dashboard -->|"MySQL :3306"| peanalytics
+    vpnusers -->|"HTTPS :443"| dashboard
+    etl -.->|"Logs :443"| monitor
+    dashboard -.->|"Logs :443"| monitor
+    bastion -.->|"Mgmt :443"| etl
+    bastion -.->|"Mgmt :443"| dashboard
+
+    dbapp ~~~ dbadmin
+    dbadmin ~~~ vpnusers
+    vpnusers ~~~ monitor
+    monitor ~~~ bastion
+
+    style spoke3 fill:#f8fafc,stroke:#8e24aa,stroke-width:2px;
+    style etlsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style dashboardsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style pesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+
+    classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;
+    classDef legend fill:#f8fafc,stroke:#94a3b8,color:#334155;
+    classDef hub fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px;
+    classDef app fill:#e3f2fd,stroke:#1565c0,color:#0d47a1,stroke-width:2px;
+    classDef data fill:#fff8e1,stroke:#b28704,color:#6d4c00,stroke-width:2px;
+    classDef analytics fill:#f3e5f5,stroke:#8e24aa,color:#4a148c,stroke-width:2px;
+    classDef external fill:#ffebee,stroke:#c62828,color:#7f1d1d,stroke-width:2px;

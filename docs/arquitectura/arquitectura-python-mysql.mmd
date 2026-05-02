@@ -1,91 +1,34 @@
-graph LR
-    user["Usuarios internos<br/>VPN corporativa"]
-    admins["Equipo TI<br/>Administradores"]
+---
+title: Diagrama 0 - Vista General
+---
+%%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 40, "rankSpacing": 55}, "themeVariables": {"fontFamily": "Trebuchet MS", "fontSize": "14px"}} }%%
+flowchart TB
+    title["Diagrama 0 - Vista General<br/>Topologia Hub and Spokes"]:::title
+    legend["Leyenda<br/>Verde = Hub<br/>Azul = Aplicaciones<br/>Amarillo = Datos y documentos<br/>Morado = Analitica<br/>Rojo = Dependencia externa"]:::legend
+    title --- legend
 
-    subgraph hubspoke["Azure Hub-Spoke para intranet privada"]
-        subgraph hub["Hub VNet"]
-            vpn["VPN Gateway P2S<br/>acceso privado"]
-            bastion["Azure Bastion<br/>soporte seguro"]
-            agw["Application Gateway WAF<br/>entrada privada HTTPS"]
-            dns["Private DNS Zones<br/>resolucion interna"]
-            kv["Azure Key Vault<br/>secretos y certificados"]
-            mon["Azure Monitor + Log Analytics<br/>observabilidad central"]
-        end
-
-        subgraph spoke1["Spoke 1 - Aplicaciones"]
-            portal["WebApp Intranet<br/>Azure App Service<br/>Django + Jinja2"]
-            adminapp["WebApp Administracion<br/>Azure App Service<br/>Django Admin"]
-            api["API privada<br/>Azure App Service<br/>FastAPI + Uvicorn"]
-        end
-
-        subgraph spoke2["Spoke 2 - Datos y documentos"]
-            dbapp["MySQL App DB<br/>usuarios, tickets, catalogos"]
-            dbadmin["MySQL Admin DB<br/>auditoria, permisos, bitacora"]
-            docs["Storage Account Privado<br/>Blob Storage de documentos"]
-            pe["Private Endpoints<br/>MySQL + Storage"]
-        end
-
-        subgraph spoke3["Spoke 3 - Analitica"]
-            etl["Proceso ETL Python<br/>extraccion y consolidacion"]
-            dbanalytics["MySQL Analytics DB<br/>modelo de reportes"]
-            dashboard["Dashboard interno<br/>Streamlit"]
-        end
+    subgraph topology["Topologia general"]
+        direction LR
+        users["Usuarios internos y TI"]:::external
+        hub["Hub<br/>Conectividad y servicios compartidos"]:::hub
+        spoke1["Spoke 1<br/>Aplicaciones privadas"]:::app
+        spoke2["Spoke 2<br/>Datos y documentos"]:::data
+        spoke3["Spoke 3<br/>Analitica"]:::analytics
+        mail["SMTP corporativo"]:::external
     end
 
-    subgraph external["Servicios externos controlados"]
-        mail["SMTP corporativo<br/>notificaciones"]
-    end
-
-    user -->|"Conecta por VPN"| vpn
-    admins -->|"Conecta por VPN"| vpn
-    vpn -->|"Ingreso al Hub"| agw
-    bastion -.->|"Soporte operativo"| spoke1
-    bastion -.->|"Soporte operativo"| spoke2
-    bastion -.->|"Soporte operativo"| spoke3
-    dns -.->|"DNS privado"| spoke1
-    dns -.->|"DNS privado"| spoke2
-    dns -.->|"DNS privado"| spoke3
+    users -->|"VPN P2S"| hub
     hub -->|"Peering"| spoke1
     hub -->|"Peering"| spoke2
     hub -->|"Peering"| spoke3
+    spoke1 -->|"Datos privados"| spoke2
+    spoke2 -->|"Datos para KPIs"| spoke3
+    spoke1 -->|"Notificaciones"| mail
 
-    agw -->|"HTTPS intranet"| portal
-    agw -->|"HTTPS administracion"| adminapp
-    portal -->|"Consume API"| api
-    adminapp -->|"Administra procesos"| api
-
-    api -->|"CRUD operacional"| dbapp
-    api -->|"Auditoria y roles"| dbadmin
-    api -->|"Carga y consulta archivos"| docs
-    api -->|"Secretos de conexion"| kv
-    api -->|"Envia correos"| mail
-    adminapp -->|"Consulta permisos"| dbadmin
-
-    pe -->|"Acceso privado"| dbapp
-    pe -->|"Acceso privado"| dbadmin
-    pe -->|"Acceso privado"| docs
-    spoke2 -->|"Replica privada"| etl
-    dbapp -->|"Datos operativos"| etl
-    dbadmin -->|"Datos de auditoria"| etl
-    etl -->|"Carga analitica"| dbanalytics
-    dashboard -->|"Lee KPIs"| dbanalytics
-    admins -->|"Consulta reportes"| dashboard
-
-    portal -.->|"Logs web"| mon
-    adminapp -.->|"Logs admin"| mon
-    api -.->|"Metricas API"| mon
-    dbapp -.->|"Auditoria BD"| mon
-    dbadmin -.->|"Auditoria BD"| mon
-    dashboard -.->|"Uso dashboard"| mon
-
-    classDef hub fill:#dff3e3,stroke:#2f6b3b,color:#17361d;
-    classDef app fill:#d9ecff,stroke:#2d6ea3,color:#16344b;
-    classDef data fill:#fff1bf,stroke:#8d6f00,color:#4a3a00;
-    classDef analytics fill:#f6defb,stroke:#8a3fa0,color:#4a1d57;
-    classDef external fill:#ffdede,stroke:#a64b4b,color:#522121;
-
-    class vpn,bastion,agw,dns,kv,mon hub;
-    class portal,adminapp,api app;
-    class dbapp,dbadmin,docs,pe data;
-    class etl,dbanalytics,dashboard analytics;
-    class mail external;
+    classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;
+    classDef legend fill:#f8fafc,stroke:#94a3b8,color:#334155;
+    classDef hub fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px;
+    classDef app fill:#e3f2fd,stroke:#1565c0,color:#0d47a1,stroke-width:2px;
+    classDef data fill:#fff8e1,stroke:#b28704,color:#6d4c00,stroke-width:2px;
+    classDef analytics fill:#f3e5f5,stroke:#8e24aa,color:#4a148c,stroke-width:2px;
+    classDef external fill:#ffebee,stroke:#c62828,color:#7f1d1d,stroke-width:2px;

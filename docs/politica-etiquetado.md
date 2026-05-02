@@ -31,7 +31,7 @@ Aplica a todos los recursos de la solucion Hub-Spoke, incluyendo red, App Servic
 
 ## Implementacion actual
 
-Las etiquetas se consolidan en `infra/terraform/envs/lab/main.tf` y se propagan a todos los modulos antes de crear recursos.
+En el estado actual del repositorio no se incluye aun la carpeta de Terraform. Cuando la infraestructura se incorpore al workspace, las etiquetas deben consolidarse en el punto de entrada del ambiente y propagarse a todos los modulos antes de crear recursos.
 
 ## Prechequeo antes del despliegue
 
