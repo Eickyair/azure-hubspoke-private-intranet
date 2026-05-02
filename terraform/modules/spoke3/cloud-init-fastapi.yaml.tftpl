@@ -1,0 +1,44 @@
+#cloud-config
+package_update: true
+packages:
+  - python3-pip
+write_files:
+  - path: /opt/${service_name}/main.py
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: ${main_py_b64}
+  - path: /opt/${service_name}/requirements.txt
+    owner: root:root
+    permissions: '0644'
+    encoding: b64
+    content: ${requirements_b64}
+  - path: /opt/${service_name}/app.env
+    owner: root:root
+    permissions: '0600'
+    encoding: b64
+    content: ${env_b64}
+  - path: /etc/systemd/system/${service_name}.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=${service_name}
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      WorkingDirectory=/opt/${service_name}
+      EnvironmentFile=/opt/${service_name}/app.env
+      ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - python3 -m pip install --upgrade pip
+  - python3 -m pip install -r /opt/${service_name}/requirements.txt
+  - systemctl daemon-reload
+  - systemctl enable --now ${service_name}
