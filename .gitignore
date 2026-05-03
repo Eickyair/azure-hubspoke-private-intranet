@@ -1,0 +1,14 @@
+azure-hubspoke-private-intranet.code-workspace
+.agents
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Mock Storage
+mock_storage/
+local_mock.db

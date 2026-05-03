@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  admin-api:
+    build:
+      context: ./src/spoke1/admin/api
+    ports:
+      - "8000:8000"
+    environment:
+      - SERVICE_NAME=admin-api-private
+
+  admin-webapp:
+    build:
+      context: ./src/spoke1/admin/webapp
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVICE_NAME=admin-web-intranet
+      - API_INTERNAL_URL=http://admin-api:8000
+      - API_EXTERNAL_URL=http://localhost:8000/api
+    depends_on:
+      - admin-api
+
+  catalog-api:
+    build:
+      context: ./src/spoke1/catalog/api
+    ports:
+      - "8002:8000"
+    environment:
+      - SERVICE_NAME=catalog-api-private
+
+  catalog-webapp:
+    build:
+      context: ./src/spoke1/catalog/webapp
+    ports:
+      - "8003:8001"
+    environment:
+      - SERVICE_NAME=catalog-web
+      - API_INTERNAL_URL=http://catalog-api:8000
+      - API_EXTERNAL_URL=http://localhost:8002
+    depends_on:
+      - catalog-api
