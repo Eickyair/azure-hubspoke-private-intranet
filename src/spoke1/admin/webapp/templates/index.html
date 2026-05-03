@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Directorio - Northwind</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Directorio Corporativo</h1>
+            <p class="subtitle">Northwind Distribución - Intranet Privada</p>
+            <div class="header-actions">
+                <select id="statusFilter" class="btn btn-secondary" style="margin-right: 8px;" onchange="fetchEmployees()">
+                    <option value="all" selected>Todos los Empleados</option>
+                    <option value="true">Solo Activos</option>
+                    <option value="false">Solo Inactivos</option>
+                </select>
+                <button class="btn btn-primary" onclick="openAddModal()">+ Nuevo Empleado</button>
+            </div>
+        </header>
+
+        <main id="app">
+            <div class="loader" id="loader">Cargando directorio...</div>
+            <div class="employee-grid" id="grid"></div>
+        </main>
+    </div>
+
+    <!-- Modal Agregar Empleado -->
+    <div class="modal-overlay" id="addModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Registrar Empleado</h2>
+                <button class="close-btn" onclick="closeAddModal()">&times;</button>
+            </div>
+            <form id="addForm" onsubmit="submitEmployee(event)">
+                <div class="form-group">
+                    <label>Nombre(s)</label>
+                    <input type="text" id="first_name" required>
+                </div>
+                <div class="form-group">
+                    <label>Apellidos</label>
+                    <input type="text" id="last_name" required>
+                </div>
+                <div class="form-group">
+                    <label>Puesto</label>
+                    <input type="text" id="position" required>
+                </div>
+                <div class="form-group">
+                    <label>Departamento</label>
+                    <select id="department" required>
+                        <option value="Operaciones">Operaciones</option>
+                        <option value="TI">TI</option>
+                        <option value="Comercial">Comercial</option>
+                        <option value="Recursos Humanos">Recursos Humanos</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Correo Electrónico</label>
+                    <input type="email" id="email" required>
+                </div>
+                <div class="form-group">
+                    <label>Foto de Perfil (Opcional)</label>
+                    <input type="file" id="profile_picture" accept="image/*">
+                </div>
+                <div class="form-group">
+                    <label>Documento / Contrato (Opcional, PDF)</label>
+                    <input type="file" id="document" accept=".pdf">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Ver Perfil -->
+    <div class="modal-overlay" id="profileModal">
+        <div class="modal-content profile-detail" id="profileContent">
+            <!-- Content injected via JS -->
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = "{{ api_base_url }}";
+
+        async function fetchEmployees() {
+            try {
+                const filter = document.getElementById('statusFilter').value;
+                let url = `${API_BASE_URL}/employees`;
+                if(filter === 'true') url += '?is_active=true';
+                if(filter === 'false') url += '?is_active=false';
+
+                const response = await fetch(url);
+                const employees = await response.json();
+                renderEmployees(employees);
+            } catch (error) {
+                console.error("Error fetching employees:", error);
+                document.getElementById('grid').innerHTML = '<div style="grid-column: 1/-1; text-align:center; color:#ef4444;">Error conectando a la API Privada</div>';
+            }
+        }
+
+        function renderEmployees(employees) {
+            const grid = document.getElementById('grid');
+            const loader = document.getElementById('loader');
+            
+            loader.style.display = 'none';
+            grid.innerHTML = '';
+
+            if(employees.length === 0) {
+                grid.innerHTML = '<p style="text-align:center; grid-column: 1/-1; color: #64748b;">No hay empleados registrados en el directorio.</p>';
+                return;
+            }
+
+            employees.forEach(emp => {
+                const card = document.createElement('div');
+                card.className = 'employee-card';
+                card.onclick = () => openProfile(emp);
+                
+                if(!emp.is_active) {
+                    card.style.opacity = '0.7';
+                    card.style.filter = 'grayscale(1)';
+                }
+                
+                let activeBadge = emp.is_active ? 
+                    `<span style="background:#22c55e; color:white; padding:2px 8px; border-radius:12px; font-size:0.7rem; position:absolute; top:12px; right:12px;">Activo</span>` : 
+                    `<span style="background:#ef4444; color:white; padding:2px 8px; border-radius:12px; font-size:0.7rem; position:absolute; top:12px; right:12px;">Inactivo</span>`;
+
+                card.style.position = 'relative';
+                
+                let avatarHtml = '';
+                if (emp.profile_picture_url) {
+                    avatarHtml = `<img src="${emp.profile_picture_url}" alt="${emp.first_name}" class="avatar">`;
+                } else {
+                    const initials = emp.first_name.charAt(0) + emp.last_name.charAt(0);
+                    avatarHtml = `<div class="avatar-placeholder">${initials.toUpperCase()}</div>`;
+                }
+
+                card.innerHTML = `
+                    ${activeBadge}
+                    <div class="avatar-container">
+                        ${avatarHtml}
+                    </div>
+                    <h3 class="name">${emp.first_name} ${emp.last_name}</h3>
+                    <div class="position">${emp.position}</div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        // --- Modals Logic ---
+        
+        function openAddModal() {
+            document.getElementById('addModal').classList.add('active');
+        }
+
+        function closeAddModal() {
+            document.getElementById('addModal').classList.remove('active');
+            document.getElementById('addForm').reset();
+        }
+
+        function openProfile(emp) {
+            let avatarHtml = `<div class="avatar-placeholder" style="width:120px; height:120px; font-size:40px; margin-bottom:16px; border-radius:50%; border:4px solid white; box-shadow:0 4px 6px rgba(0,0,0,0.05); background:#e2e8f0; display:flex; align-items:center; justify-content:center;">${emp.first_name[0]}${emp.last_name[0]}</div>`;
+            if(emp.profile_picture_url) {
+                const imgUrl = emp.profile_picture_url.startsWith('/') ? `${API_BASE_URL.replace('/api', '')}${emp.profile_picture_url}` : emp.profile_picture_url;
+                avatarHtml = `<img src="${imgUrl}" style="width:120px; height:120px; border-radius:50%; object-fit:cover; margin-bottom:16px; border:4px solid white; box-shadow:0 4px 6px rgba(0,0,0,0.05);">`;
+            }
+
+            const content = document.getElementById('profileContent');
+            content.innerHTML = `
+                <div class="modal-header" style="width: 100%; border-bottom: 1px solid rgba(255,255,255,0.4); padding-bottom:16px;">
+                    <h2 style="font-size:1.2rem;">Perfil Corporativo</h2>
+                    <button class="close-btn" onclick="document.getElementById('profileModal').classList.remove('active')">&times;</button>
+                </div>
+                ${avatarHtml}
+                <div style="margin-bottom: 16px;">
+                    <input type="file" id="changePicInput_${emp.id}" style="display:none;" accept="image/*" onchange="uploadNewPicture(${emp.id})">
+                    <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 8px;" onclick="document.getElementById('changePicInput_${emp.id}').click()">Cambiar Foto</button>
+                    
+                    <input type="file" id="changeDocInput_${emp.id}" style="display:none;" accept=".pdf" onchange="uploadNewDocument(${emp.id})">
+                    <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 8px; margin-left: 8px;" onclick="document.getElementById('changeDocInput_${emp.id}').click()">Subir/Cambiar Doc</button>
+                </div>
+                <h2 style="margin-bottom:8px;">${emp.first_name} ${emp.last_name}</h2>
+                <div style="color: #2563eb; font-weight:600; font-size:1.1rem; margin-bottom:4px;">${emp.position}</div>
+                <div class="department">${emp.department}</div>
+                
+                <div style="margin-top: 16px;">
+                    <button class="btn btn-secondary" onclick="toggleStatus(${emp.id})">${emp.is_active ? 'Desactivar Empleado' : 'Reactivar Empleado'}</button>
+                </div>
+                
+                <div class="bio" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.4);">${emp.email}</a>
+                
+                <div class="bio">
+                    <strong>ID Empleado:</strong> #${emp.id.toString().padStart(4, '0')}<br>
+                    Este es un perfil detallado de la intranet corporativa. Actualmente operando en la modalidad segura Hub and Spoke.
+                </div>
+            `;
+            document.getElementById('profileModal').classList.add('active');
+        }
+
+        async function submitEmployee(e) {
+            e.preventDefault();
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.innerText = 'Guardando...';
+            btn.disabled = true;
+
+            const formData = new FormData();
+            formData.append('first_name', document.getElementById('first_name').value);
+            formData.append('last_name', document.getElementById('last_name').value);
+            formData.append('position', document.getElementById('position').value);
+            formData.append('department', document.getElementById('department').value);
+            formData.append('email', document.getElementById('email').value);
+            
+            const profilePic = document.getElementById('profile_picture').files[0];
+            if(profilePic) formData.append('profile_picture', profilePic);
+            
+            const doc = document.getElementById('document').files[0];
+            if(doc) formData.append('document', doc);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/employees`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if(!response.ok) throw new Error("Error al guardar");
+                
+                closeAddModal();
+                fetchEmployees(); // Refrescar grid
+            } catch (error) {
+                alert("Hubo un error al guardar el empleado.");
+                console.error(error);
+            } finally {
+                btn.innerText = 'Guardar';
+                btn.disabled = false;
+            }
+        }
+
+        async function uploadNewPicture(empId) {
+            const fileInput = document.getElementById(`changePicInput_${empId}`);
+            const file = fileInput.files[0];
+            if(!file) return;
+
+            const formData = new FormData();
+            formData.append('profile_picture', file);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/employees/${empId}/picture`, {
+                    method: 'PATCH',
+                    body: formData
+                });
+                if(!response.ok) throw new Error("Error subiendo foto");
+                
+                document.getElementById('profileModal').classList.remove('active');
+                fetchEmployees();
+            } catch (e) {
+                alert("Hubo un error al cambiar la foto.");
+                console.error(e);
+            }
+        }
+
+        async function uploadNewDocument(empId) {
+            const fileInput = document.getElementById(`changeDocInput_${empId}`);
+            const file = fileInput.files[0];
+            if(!file) return;
+
+            const formData = new FormData();
+            formData.append('document', file);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/employees/${empId}/document`, {
+                    method: 'PATCH',
+                    body: formData
+                });
+                if(!response.ok) throw new Error("Error subiendo documento");
+                
+                document.getElementById('profileModal').classList.remove('active');
+                fetchEmployees();
+            } catch (e) {
+                alert("Hubo un error al cambiar el documento.");
+                console.error(e);
+            }
+        }
+
+        async function toggleStatus(empId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/employees/${empId}/toggle-status`, { method: 'PATCH' });
+                if(!response.ok) throw new Error("Error cambiando status");
+                document.getElementById('profileModal').classList.remove('active');
+                fetchEmployees();
+            } catch (e) {
+                alert("Hubo un error al cambiar el status.");
+                console.error(e);
+            }
+        }
+
+        // Cargar empleados al inicio
+        document.addEventListener('DOMContentLoaded', fetchEmployees);
+    </script>
+</body>
+</html>
