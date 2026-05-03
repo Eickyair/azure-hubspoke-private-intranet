@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Northwind - Catálogo de Productos</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script>
+        const API_URL = "{{ api_url }}";
+
+        async function fetchProducts(category = null) {
+            const grid = document.getElementById('productGrid');
+            grid.innerHTML = '<div class="loader">Cargando productos...</div>';
+            
+            try {
+                let url = `${API_URL}/products`;
+                if (category && category !== 'all') {
+                    url += `?category=${category}`;
+                }
+                
+                const response = await fetch(url);
+                const products = await response.json();
+                
+                grid.innerHTML = '';
+                
+                if (products.length === 0) {
+                    grid.innerHTML = '<div class="loader">No hay productos disponibles en esta categoría.</div>';
+                    return;
+                }
+                
+                products.forEach(p => {
+                    if (!p.is_active) return; // Hide inactive products from clients
+                    
+                    const card = document.createElement('div');
+                    card.className = 'product-card';
+                    
+                    let imageHtml = '<div class="product-img-placeholder">🛒</div>';
+                    if (p.image_blob) {
+                        imageHtml = `<img src="${API_URL}/storage/${p.image_blob}" alt="${p.name}">`;
+                    }
+                    
+                    const stockClass = p.stock < 10 ? 'low' : '';
+                    const stockText = p.stock > 0 ? (p.stock < 10 ? `¡Solo ${p.stock} en stock - haz tu pedido pronto!` : 'Disponible') : 'Agotado';
+                    
+                    card.innerHTML = `
+                        <div class="product-img-container">
+                            ${imageHtml}
+                        </div>
+                        <div class="product-title" onclick="alert('Funcionalidad de detalle en desarrollo.')">${p.name}</div>
+                        <div class="product-price"><span class="currency">$</span>${p.price.toFixed(2)}</div>
+                        <div class="product-stock ${stockClass}">${stockText}</div>
+                        <button class="btn-add" onclick="alert('Funcionalidad de carrito deshabilitada por ahora.')">Agregar al carrito</button>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (error) {
+                console.error("Error fetching products:", error);
+                grid.innerHTML = '<div class="loader">Ocurrió un error al cargar el catálogo. Por favor intente más tarde.</div>';
+            }
+        }
+
+        window.onload = () => fetchProducts();
+    </script>
+</head>
+<body>
+
+    <nav class="navbar">
+        <div class="nav-brand">northwind<span>.com</span></div>
+        <div class="search-bar">
+            <input type="text" placeholder="Buscar productos (mock)...">
+            <button class="search-btn">🔍</button>
+        </div>
+        <div style="font-size: 0.9rem; margin-right: 20px;">
+            Hola, Identifícate<br><b>Cuentas y Listas</b>
+        </div>
+        <div style="font-size: 0.9rem; margin-right: 20px;">
+            Devoluciones<br><b>y Pedidos</b>
+        </div>
+        <div style="font-weight: bold;">
+            🛒 Carrito
+        </div>
+    </nav>
+    
+    <div class="subnav">
+        <a href="#" onclick="fetchProducts('all')">Todo</a>
+        <a href="#" onclick="fetchProducts('Electrónica')">Electrónica</a>
+        <a href="#" onclick="fetchProducts('Oficina')">Oficina</a>
+        <a href="#" onclick="fetchProducts('Limpieza')">Limpieza</a>
+        <a href="#">Ofertas del Día</a>
+        <a href="#">Servicio al Cliente</a>
+    </div>
+
+    <div class="container">
+        <div class="banner">
+            <h1>Descubre Nuestros Productos</h1>
+            <p>La mejor selección de suministros para tu empresa a los mejores precios.</p>
+        </div>
+
+        <div id="productGrid" class="product-grid">
+            <!-- Products injected by JS -->
+        </div>
+    </div>
+
+</body>
+</html>

@@ -1,16 +1,21 @@
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Catalog WebApp")
 
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+templates = Jinja2Templates(directory="templates")
+
+API_EXTERNAL_URL = os.getenv("API_EXTERNAL_URL", "http://localhost:8002/api")
+
 @app.get("/", response_class=HTMLResponse)
-def read_root():
-    return """
-    <html>
-        <head><title>Catálogo de Productos</title></head>
-        <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-            <h1>Bienvenido al Catálogo de Productos</h1>
-            <p>El desarrollo del frontend comenzará aquí.</p>
-        </body>
-    </html>
-    """
+def index(request: Request):
+    return templates.TemplateResponse(
+        "index.html", 
+        {"request": request, "api_url": API_EXTERNAL_URL}
+    )
