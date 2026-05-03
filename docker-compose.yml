@@ -18,6 +18,7 @@ services:
       - SERVICE_NAME=admin-web-intranet
       - API_INTERNAL_URL=http://admin-api:8000
       - API_EXTERNAL_URL=http://localhost:8000/api
+      - CATALOG_API_EXTERNAL_URL=http://localhost:8002/api
     depends_on:
       - admin-api
 
@@ -37,6 +38,6 @@ services:
     environment:
       - SERVICE_NAME=catalog-web
       - API_INTERNAL_URL=http://catalog-api:8000
-      - API_EXTERNAL_URL=http://localhost:8002
+      - API_EXTERNAL_URL=http://localhost:8002/api
     depends_on:
       - catalog-api

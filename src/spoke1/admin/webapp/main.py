@@ -10,6 +10,7 @@ SERVICE_NAME = os.getenv("SERVICE_NAME", "web-intranet")
 API_INTERNAL_URL = os.getenv("API_INTERNAL_URL", "http://localhost:8000")
 # For frontend browser calls
 API_EXTERNAL_URL = os.getenv("API_EXTERNAL_URL", "http://localhost:8000/api")
+CATALOG_API_EXTERNAL_URL = os.getenv("CATALOG_API_EXTERNAL_URL", "http://localhost:8002/api")
 
 app = FastAPI(title=SERVICE_NAME)
 
@@ -20,7 +21,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {
         "request": request, 
-        "api_base_url": API_EXTERNAL_URL
+        "api_base_url": API_EXTERNAL_URL,
+        "catalog_api_url": CATALOG_API_EXTERNAL_URL
     })
 
 @app.get("/health")
