@@ -89,7 +89,12 @@ def health_payload() -> dict:
 
 @app.get("/")
 def root() -> dict:
-    return {"service": SERVICE_NAME, "health": "/health"}
+    return {"service": SERVICE_NAME, "live": "/live", "health": "/health"}
+
+
+@app.get("/live")
+def live() -> dict:
+    return {"service": SERVICE_NAME, "status": "ok", "checked_at": utc_now()}
 
 
 @app.get("/health")

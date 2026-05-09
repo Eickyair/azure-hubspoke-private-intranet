@@ -25,6 +25,7 @@ variable "config" {
     vm_size                     = string
     mysql_sku_name              = string
     mysql_version               = string
+    mysql_zone                  = string
     mysql_storage_gb            = number
     mysql_backup_retention_days = number
     analytics_database_name     = string
@@ -37,6 +38,10 @@ variable "hub_vnet_id" {
 
 variable "hub_vnet_name" {
   type = string
+}
+
+variable "use_remote_gateways" {
+  type = bool
 }
 
 variable "mysql_private_dns_zone_id" {
@@ -75,4 +80,14 @@ variable "upstream_databases" {
     admin_host     = string
     admin_database = string
   })
+}
+
+variable "hub_bastion_subnet_prefix" {
+  type        = string
+  description = "CIDR del AzureBastionSubnet del Hub. Permite SSH inbound a las VMs solo desde Bastion."
+}
+
+variable "hub_management_subnet_prefix" {
+  type        = string
+  description = "CIDR del hub management subnet (Jumpbox). Permite acceso API/Streamlit inbound para pruebas."
 }

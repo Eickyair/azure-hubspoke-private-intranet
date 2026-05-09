@@ -1,10 +1,17 @@
 .terraform/
-.terraform-build/*.zip
+.terraform-build/
 *.tfstate
 *.tfstate.*
+main.tfvars
 crash.log
 crash.*.log
+tfplan
+tfplan-*
+*.tfplan
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+# Script de diagnóstico renderizado (contiene credenciales)
+diagnostics.ps1
+diagnostics-output.txt

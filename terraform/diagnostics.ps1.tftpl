@@ -1,0 +1,638 @@
+#Requires -Version 5.1
+# ================================================================
+# Diagnostico de infraestructura Hub-Spoke Private Intranet
+# Resource Group : ${resource_group_name}
+# GENERADO AUTOMATICAMENTE POR TERRAFORM - NO EDITAR MANUALMENTE
+# ================================================================
+$ErrorActionPreference = 'Continue'
+$ProgressPreference    = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$DiagDir   = 'C:\diag'
+$Timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$LogFile   = "$DiagDir\diag-$Timestamp.txt"
+$JsonFile  = "$DiagDir\diag-$Timestamp.json"
+
+New-Item -ItemType Directory -Force -Path $DiagDir | Out-Null
+
+# -- Endpoints inyectados por Terraform ---------------------------
+$UrlIntranet        = '${intranet_url}'
+$UrlAdmin           = '${admin_url}'
+$UrlApi             = '${api_url}'
+$DnsIntranet        = '${dns_intranet}'
+$DnsAdmin           = '${dns_admin}'
+$DnsApi             = '${dns_api}'
+$DnsAnalytics       = '${dns_analytics}'
+$MysqlAppHost       = '${mysql_app_host}'
+$MysqlAdminHost     = '${mysql_admin_host}'
+$MysqlAnalyticsHost = '${mysql_analytics_host}'
+$MysqlUser          = '${mysql_user}'
+$MysqlPassword      = '${mysql_password}'
+$StorageName        = '${storage_account_name}'
+$StorageEndpoint    = '${storage_blob_endpoint}'.TrimEnd('/')
+$EtlIp              = '${etl_private_ip}'
+$DashboardIp        = '${dashboard_private_ip}'
+$AppGwIp            = '${app_gateway_private_ip}'
+$RgName             = '${resource_group_name}'
+
+# -- Estado global ------------------------------------------------
+$Passed  = 0
+$Failed  = 0
+$Warned  = 0
+$Results = [System.Collections.Generic.List[object]]::new()
+
+# ================================================================
+# HELPERS
+# ================================================================
+function Log {
+    param([string]$Msg)
+    Add-Content -Path $LogFile -Value $Msg
+    Write-Host $Msg
+}
+
+function Write-Section {
+    param([string]$Title)
+    $sep = '=' * 70
+    Log "`n$sep`n  $Title`n$sep"
+}
+
+function Write-Check {
+    param(
+        [string]$Name,
+        [ValidateSet('PASS','FAIL','WARN')][string]$Status,
+        [string]$Detail = ''
+    )
+    $script:Results.Add([pscustomobject]@{ Name = $Name; Status = $Status; Detail = $Detail })
+    switch ($Status) {
+        'PASS' { $script:Passed++; $color = 'Green'  }
+        'FAIL' { $script:Failed++; $color = 'Red'    }
+        'WARN' { $script:Warned++; $color = 'Yellow' }
+    }
+    $line = "  [$Status] $Name"
+    if ($Detail) { $line += "  =>  $Detail" }
+    Write-Host $line -ForegroundColor $color
+    Add-Content -Path $LogFile -Value $line
+}
+
+function Test-TcpPort {
+    param([string]$HostName, [int]$Port, [int]$TimeoutMs = 4000)
+    try {
+        $tcp = [System.Net.Sockets.TcpClient]::new()
+        $ar  = $tcp.BeginConnect($HostName, $Port, $null, $null)
+        if ($ar.AsyncWaitHandle.WaitOne($TimeoutMs)) {
+            $tcp.EndConnect($ar); $tcp.Close(); return $true
+        }
+        $tcp.Close(); return $false
+    } catch { return $false }
+}
+
+function Read-MySQLBanner {
+    param([string]$HostName, [int]$Port = 3306, [int]$TimeoutMs = 5000)
+    try {
+        $tcp = [System.Net.Sockets.TcpClient]::new()
+        $ar  = $tcp.BeginConnect($HostName, $Port, $null, $null)
+        if (-not $ar.AsyncWaitHandle.WaitOne($TimeoutMs)) { $tcp.Close(); return $null }
+        $tcp.EndConnect($ar)
+        $stream = $tcp.GetStream()
+        $stream.ReadTimeout = 3000
+        $buf = New-Object byte[] 512
+        $n   = $stream.Read($buf, 0, $buf.Length)
+        $tcp.Close()
+        if ($n -gt 5) {
+            # MySQL handshake: primeros 4 bytes = length/seq, byte 4 = protocol version (10),
+            # seguido por la cadena de version terminada en NUL
+            $raw = [System.Text.Encoding]::ASCII.GetString($buf, 5, [Math]::Min($n - 5, 80))
+            return ($raw -split [char]0)[0].Trim()
+        }
+        return '(banner ilegible)'
+    } catch { return $null }
+}
+
+function Test-MySQLAuth {
+    param(
+        [string]$HostName,
+        [int]$Port       = 3306,
+        [string]$User,
+        [string]$Password,
+        [int]$TimeoutMs  = 8000
+    )
+    # Implementa el handshake MySQL 4.1/5.x en TCP puro para autenticar sin cliente externo.
+    # Retorna @{ Ok; Detail; Version }
+    try {
+        $tcp = [System.Net.Sockets.TcpClient]::new()
+        $ar  = $tcp.BeginConnect($HostName, $Port, $null, $null)
+        if (-not $ar.AsyncWaitHandle.WaitOne($TimeoutMs)) {
+            $tcp.Close()
+            return @{ Ok = $false; Detail = 'Timeout TCP'; Version = '' }
+        }
+        $tcp.EndConnect($ar)
+        $stream = $tcp.GetStream(); $stream.ReadTimeout = 5000
+
+        # Leer Initial Handshake Packet
+        $buf = New-Object byte[] 1024
+        $n   = $stream.Read($buf, 0, $buf.Length)
+        if ($n -lt 5) { $tcp.Close(); return @{ Ok = $false; Detail = 'Paquete de saludo truncado'; Version = '' } }
+
+        # Extraer version del servidor (bytes 5..NUL)
+        $verRaw = [System.Text.Encoding]::ASCII.GetString($buf, 5, [Math]::Min($n-5, 80))
+        $srvVer = ($verRaw -split [char]0)[0]
+
+        # Capacidades del servidor (bytes de la posicion correcta del handshake v10)
+        # Protocolo v10: byte4=0x0a, version (NUL-terminated), 4 bytes conn_id, 8 bytes auth_data_1,
+        # 1 byte filler, 2 bytes capability_flags_1
+        $protoVer = $buf[4]
+        if ($protoVer -ne 10) {
+            $tcp.Close()
+            return @{ Ok = $false; Detail = "Protocolo MySQL desconocido: $protoVer"; Version = $srvVer }
+        }
+
+        # Localizar NUL despues de la version para obtener auth-plugin-data (challenge)
+        $pos = 5
+        while ($pos -lt $n -and $buf[$pos] -ne 0) { $pos++ }
+        $pos++ # saltar NUL
+
+        # 4 bytes conn_id + 8 bytes auth_data_part1
+        $pos += 4 # conn_id
+        $authData1 = $buf[$pos..($pos+7)]
+        $pos += 8
+        $pos++ # filler 0x00
+
+        # Capability flags (2 bytes)
+        $cap1 = [BitConverter]::ToUInt16($buf, $pos); $pos += 2
+        $pos += 1  # charset
+        $pos += 2  # status flags
+        $cap2 = [BitConverter]::ToUInt16($buf, $pos); $pos += 2
+        $capabilities = ($cap2 -shl 16) -bor $cap1
+
+        # auth_data length / filler
+        $authDataLen = if ($buf[$pos] -gt 0) { $buf[$pos] } else { 0 }; $pos++
+        $pos += 10  # reserved
+
+        # auth_data_part2
+        $part2Len = [Math]::Max(13, $authDataLen - 8)
+        $authData2 = $buf[$pos..($pos + $part2Len - 2)]  # excluir NUL final
+        $challenge = $authData1 + $authData2
+
+        # Calcular respuesta SHA1 (MySQL Native Password):
+        # token = SHA1(challenge XOR SHA1(SHA1(password)))
+        $sha1 = [System.Security.Cryptography.SHA1]::Create()
+        $pwdBytes   = [System.Text.Encoding]::UTF8.GetBytes($Password)
+        $sha1pwd    = $sha1.ComputeHash($pwdBytes)
+        $sha1sha1   = $sha1.ComputeHash($sha1pwd)
+        $combined   = $challenge + $sha1sha1
+        $sha1combo  = $sha1.ComputeHash($combined)
+        $token = for ($i = 0; $i -lt 20; $i++) { $sha1pwd[$i] -bxor $sha1combo[$i] }
+        $sha1.Dispose()
+
+        # Construir Client Auth Response (CLIENT_PROTOCOL_41)
+        $CLIENT_PROTOCOL_41   = 0x00000200
+        $CLIENT_SECURE_CONNECTION = 0x00008000
+        $CLIENT_PLUGIN_AUTH   = 0x00080000
+        $clientCap = $CLIENT_PROTOCOL_41 -bor $CLIENT_SECURE_CONNECTION -bor $CLIENT_PLUGIN_AUTH
+
+        $userBytes  = [System.Text.Encoding]::UTF8.GetBytes($User)
+        $pluginName = [System.Text.Encoding]::ASCII.GetBytes('mysql_native_password')
+
+        $body  = [System.Collections.Generic.List[byte]]::new()
+        $body.AddRange([BitConverter]::GetBytes([uint32]$clientCap))
+        $body.AddRange([BitConverter]::GetBytes([uint32]16777216))  # max_packet_size
+        $body.Add(33)  # utf8_general_ci
+        $body.AddRange([byte[]]@(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))  # filler 23 bytes
+        $body.AddRange($userBytes); $body.Add(0)  # user + NUL
+        $body.Add([byte]$token.Count)             # auth response length
+        $body.AddRange([byte[]]$token)            # auth response
+        $body.AddRange($pluginName); $body.Add(0) # plugin name + NUL
+
+        # Empaquetar con cabecera MySQL (3 bytes length + 1 byte seq=1)
+        $bodyArr = $body.ToArray()
+        $lenBytes = [byte[]]@(($bodyArr.Length -band 0xFF), (($bodyArr.Length -shr 8) -band 0xFF), (($bodyArr.Length -shr 16) -band 0xFF), 1)
+        $packet = $lenBytes + $bodyArr
+        $stream.Write($packet, 0, $packet.Length)
+
+        # Leer respuesta
+        $rbuf = New-Object byte[] 512
+        $rn   = $stream.Read($rbuf, 0, $rbuf.Length)
+        $tcp.Close()
+
+        if ($rn -ge 5) {
+            $firstByte = $rbuf[4]
+            if ($firstByte -eq 0x00) {
+                return @{ Ok = $true; Detail = "Autenticacion OK como $User"; Version = $srvVer }
+            } elseif ($firstByte -eq 0xFE) {
+                return @{ Ok = $false; Detail = "Auth switch request (metodo no soportado)"; Version = $srvVer }
+            } elseif ($firstByte -eq 0xFF) {
+                $errCode = [BitConverter]::ToUInt16($rbuf, 5)
+                $errMsg  = [System.Text.Encoding]::UTF8.GetString($rbuf, 13, [Math]::Max(0, $rn - 13)).Trim()
+                return @{ Ok = $false; Detail = "Error MySQL $errCode`: $errMsg"; Version = $srvVer }
+            }
+        }
+        return @{ Ok = $false; Detail = "Respuesta inesperada del servidor ($rn bytes)"; Version = $srvVer }
+    } catch {
+        return @{ Ok = $false; Detail = $_.Exception.Message; Version = '' }
+    }
+}
+
+function Get-MySQLClient {
+    # Intenta localizar mysql.exe en PATH o rutas conocidas
+    $candidates = @(
+        'mysql',
+        'C:\Program Files\MySQL\MySQL Shell 8.0\bin\mysqlsh.exe',
+        'C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe',
+        'C:\tools\mysql\bin\mysql.exe'
+    )
+    foreach ($c in $candidates) {
+        try {
+            $out = & $c --version 2>&1
+            if ($LASTEXITCODE -eq 0 -or ($out -match 'mysql|mysqlsh')) { return $c }
+        } catch {}
+    }
+    return $null
+}
+
+function Test-Http {
+    param([string]$Url, [int]$TimeoutSec = 15)
+    try {
+        $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+        $body = if ($r.Content.Length -gt 0) { $r.Content.Substring(0, [Math]::Min(300, $r.Content.Length)).Trim() } else { '' }
+        return [pscustomobject]@{ Ok = $true;  Code = $r.StatusCode; Body = $body }
+    } catch [System.Net.WebException] {
+        $code = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+        return [pscustomobject]@{ Ok = $false; Code = $code; Body = $_.Exception.Message }
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Code = 0; Body = $_.Exception.Message }
+    }
+}
+
+function Test-DnsResolve {
+    param([string]$Name, [string]$ExpectedIp = '')
+    try {
+        $records = Resolve-DnsName -Name $Name -ErrorAction Stop
+        $ips     = ($records | Where-Object { $_.QueryType -eq 'A' } | Select-Object -ExpandProperty IPAddress) -join ', '
+        if ($ips -eq '') { $ips = ($records | Select-Object -First 1 | Select-Object -ExpandProperty IPAddress -ErrorAction SilentlyContinue) }
+        if ($ExpectedIp -and ($ips -notcontains $ExpectedIp)) {
+            return [pscustomobject]@{ Ok = $false; IPs = $ips; Msg = "Esperaba IP $ExpectedIp" }
+        }
+        return [pscustomobject]@{ Ok = $true; IPs = $ips; Msg = '' }
+    } catch {
+        return [pscustomobject]@{ Ok = $false; IPs = ''; Msg = $_.Exception.Message }
+    }
+}
+
+function Test-BlobEndpoint {
+    param([string]$BaseEndpoint)
+    $uri = "$BaseEndpoint/?comp=list"
+    try {
+        $r = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+        return [pscustomobject]@{ Ok = $true; Detail = "HTTP $($r.StatusCode) - acceso anonimo (inesperado)" }
+    } catch [System.Net.WebException] {
+        $code = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+        # 400/401/403/409 = endpoint alcanzable pero rechaza peticion no autenticada (comportamiento CORRECTO)
+        if ($code -in @(400, 401, 403, 409)) {
+            return [pscustomobject]@{ Ok = $true; Detail = "HTTP $code - endpoint alcanzable, autenticacion requerida (red CORRECTA)" }
+        }
+        return [pscustomobject]@{ Ok = $false; Detail = "HTTP $code - $($_.Exception.Message)" }
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message }
+    }
+}
+
+# ================================================================
+# INICIO DE DIAGNOSTICO
+# ================================================================
+$startTime = Get-Date
+
+Log '================================================================'
+Log '  DIAGNOSTICO Hub-Spoke Private Intranet'
+Log "  Resource Group : $RgName"
+Log "  Iniciado       : $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))"
+Log "  Maquina        : $env:COMPUTERNAME  ($env:USERNAME)"
+Log '================================================================'
+
+# -----------------------------------------------------------------
+# SECCION 1 - RESOLUCION DNS PRIVADA
+# -----------------------------------------------------------------
+Write-Section '1. RESOLUCION DNS PRIVADA (zonas privatelink.* y northwind.lab)'
+
+$dnsTests = @(
+    @{ Name = $DnsIntranet;        Expected = $AppGwIp;    Label = "intranet.northwind.lab  ->  App Gateway ($AppGwIp)" }
+    @{ Name = $DnsAdmin;           Expected = $AppGwIp;    Label = "admin.northwind.lab     ->  App Gateway ($AppGwIp)" }
+    @{ Name = $DnsApi;             Expected = $AppGwIp;    Label = "api.northwind.lab       ->  App Gateway ($AppGwIp)" }
+    @{ Name = $DnsAnalytics;       Expected = $DashboardIp;Label = "kpi.northwind.lab       ->  Dashboard VM ($DashboardIp)" }
+    @{ Name = $MysqlAppHost;       Expected = '';          Label = "MySQL app               ->  $MysqlAppHost" }
+    @{ Name = $MysqlAdminHost;     Expected = '';          Label = "MySQL admin             ->  $MysqlAdminHost" }
+    @{ Name = $MysqlAnalyticsHost; Expected = '';          Label = "MySQL analytics         ->  $MysqlAnalyticsHost" }
+    @{ Name = "$StorageName.blob.core.windows.net"; Expected = ''; Label = "Blob Storage            ->  $StorageName" }
+)
+
+foreach ($t in $dnsTests) {
+    $r = Test-DnsResolve -Name $t.Name -ExpectedIp $t.Expected
+    if ($r.Ok) {
+        Write-Check -Name $t.Label -Status 'PASS' -Detail "Resuelve a: $($r.IPs)"
+    } else {
+        Write-Check -Name $t.Label -Status 'FAIL' -Detail "$($r.Msg)  (obtenido: '$($r.IPs)')"
+    }
+}
+
+# -----------------------------------------------------------------
+# SECCION 2 - HTTP HEALTH CHECKS (App Services via App Gateway)
+# -----------------------------------------------------------------
+Write-Section '2. HTTP HEALTH CHECKS - App Services (via App Gateway interno)'
+
+# /live = health check de App Service; /health = endpoint de la API
+$httpEndpoints = @(
+    @{ Url = "$UrlIntranet/live"; Label = 'Webapp Intranet  /live' }
+    @{ Url = "$UrlAdmin/live";    Label = 'Webapp Admin      /live' }
+    @{ Url = $UrlApi;             Label = 'API FastAPI        /health' }
+)
+
+foreach ($t in $httpEndpoints) {
+    $r = Test-Http -Url $t.Url
+    if ($r.Ok) {
+        Write-Check -Name $t.Label -Status 'PASS' -Detail "HTTP $($r.Code) | $($r.Body)"
+    } else {
+        Write-Check -Name $t.Label -Status 'FAIL' -Detail "HTTP $($r.Code) | $($r.Body)"
+    }
+}
+
+# Dashboard Streamlit via IP directa (spoke3, no pasa por App Gateway)
+$rDash = Test-Http -Url "http://$DashboardIp`:8501"
+if ($rDash.Ok) {
+    Write-Check -Name 'Dashboard Streamlit :8501 (IP directa)' -Status 'PASS' -Detail "HTTP $($rDash.Code)"
+} else {
+    Write-Check -Name 'Dashboard Streamlit :8501 (IP directa)' -Status 'FAIL' -Detail "HTTP $($rDash.Code) | $($rDash.Body)"
+}
+
+# ETL FastAPI via IP directa
+$rEtl = Test-Http -Url "http://$EtlIp`:8000/health"
+if ($rEtl.Ok) {
+    Write-Check -Name 'ETL FastAPI /health :8000 (IP directa)' -Status 'PASS' -Detail "HTTP $($rEtl.Code) | $($rEtl.Body)"
+} else {
+    Write-Check -Name 'ETL FastAPI /health :8000 (IP directa)' -Status 'FAIL' -Detail "HTTP $($rEtl.Code) | $($rEtl.Body)"
+}
+
+# -----------------------------------------------------------------
+# SECCION 3 - CONECTIVIDAD MySQL (TCP + Auth + Banner de version)
+# -----------------------------------------------------------------
+Write-Section '3. CONECTIVIDAD MySQL - TCP:3306 + autenticacion + version servidor'
+
+Log "  Usuario MySQL : $MysqlUser"
+Log "  (contrasena omitida del log por seguridad)"
+
+$mysqlServers = @(
+    @{ Host = $MysqlAppHost;       Label = 'MySQL app       (spoke2)' }
+    @{ Host = $MysqlAdminHost;     Label = 'MySQL admin     (spoke2)' }
+    @{ Host = $MysqlAnalyticsHost; Label = 'MySQL analytics (spoke3)' }
+)
+
+# Intentar autenticacion completa via protocolo nativo MySQL
+foreach ($srv in $mysqlServers) {
+    $authResult = Test-MySQLAuth -HostName $srv.Host -User $MysqlUser -Password $MysqlPassword
+    if ($authResult.Ok) {
+        Write-Check -Name "$($srv.Label) - Auth" -Status 'PASS' `
+            -Detail "$($authResult.Detail)  |  Version: $($authResult.Version)"
+    } else {
+        # Auth fallo - puede ser SSL requerido (Azure MySQL exige TLS). Comprobar con banner.
+        $banner = Read-MySQLBanner -HostName $srv.Host
+        if ($null -ne $banner) {
+            Write-Check -Name "$($srv.Label) - TCP+Banner" -Status 'WARN' `
+                -Detail "TCP:3306 OK, banner: '$banner'  |  Auth: $($authResult.Detail)"
+            Log "  INFO: Azure MySQL Flexible Server requiere TLS/SSL para autenticar."
+            Log "        Para probar con mysql.exe: mysql -h $($srv.Host) -u $MysqlUser -p --ssl-mode=REQUIRED"
+        } else {
+            Write-Check -Name "$($srv.Label) - TCP:3306" -Status 'FAIL' `
+                -Detail "No alcanzable. Auth error: $($authResult.Detail)"
+        }
+    }
+}
+
+# Intentar mysql.exe si esta disponible
+$mysqlBin = Get-MySQLClient
+if ($mysqlBin) {
+    Log "`n  Cliente MySQL encontrado: $mysqlBin"
+    foreach ($srv in $mysqlServers) {
+        try {
+            $queryOut = & $mysqlBin -h $srv.Host -u $MysqlUser "-p$MysqlPassword" `
+                --ssl-mode=REQUIRED --connect-timeout=8 `
+                -e "SELECT VERSION(), NOW(), @@global.hostname AS server_hostname;" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Check -Name "$($srv.Label) - SQL query" -Status 'PASS' -Detail ($queryOut -join ' | ')
+            } else {
+                Write-Check -Name "$($srv.Label) - SQL query" -Status 'WARN' -Detail ($queryOut -join ' ')
+            }
+        } catch {
+            Write-Check -Name "$($srv.Label) - SQL query" -Status 'WARN' -Detail $_.Exception.Message
+        }
+    }
+} else {
+    Log "  INFO: mysql.exe no encontrado en este equipo. Para instalar:"
+    Log "        winget install Oracle.MySQL  o  choco install mysql-cli"
+}
+
+# -----------------------------------------------------------------
+# SECCION 4 - AZURE BLOB STORAGE (Private Endpoint)
+# -----------------------------------------------------------------
+Write-Section '4. AZURE BLOB STORAGE - Private Endpoint TCP:443 + REST API'
+
+# 4a. TCP al private endpoint
+$storageHost = ($StorageEndpoint -replace 'https?://', '') -replace '/.*', ''
+$tcpBlob = Test-TcpPort -HostName $storageHost -Port 443
+if ($tcpBlob) {
+    Write-Check -Name "Storage TCP:443  ($StorageName)" -Status 'PASS' -Detail "Private Endpoint alcanzable"
+} else {
+    Write-Check -Name "Storage TCP:443  ($StorageName)" -Status 'FAIL' -Detail "No alcanzable en TCP:443 - revisar Private Endpoint y NSG"
+}
+
+# 4b. HTTP al REST API (se espera 400/401/403 si la red funciona)
+$blobResult = Test-BlobEndpoint -BaseEndpoint $StorageEndpoint
+if ($blobResult.Ok) {
+    Write-Check -Name "Blob Storage REST API ($StorageName)" -Status 'PASS' -Detail $blobResult.Detail
+} else {
+    Write-Check -Name "Blob Storage REST API ($StorageName)" -Status 'FAIL' -Detail $blobResult.Detail
+}
+
+# -----------------------------------------------------------------
+# SECCION 5 - ALCANCE A VMs (ICMP + TCP por servicio)
+# -----------------------------------------------------------------
+Write-Section '5. ALCANCE A VMs spoke3 - ICMP Ping + TCP por puerto de servicio'
+
+$vms = @(
+    @{ IP = $EtlIp;       Name = 'ETL Runner VM (spoke3)';    Ports = @(8000, 22) }
+    @{ IP = $DashboardIp; Name = 'Dashboard VM  (spoke3)';    Ports = @(8501, 22) }
+)
+
+foreach ($vm in $vms) {
+    # ICMP ping
+    $ping = Test-Connection -ComputerName $vm.IP -Count 2 -Quiet -ErrorAction SilentlyContinue
+    if ($ping) {
+        Write-Check -Name "$($vm.Name) - ICMP ping" -Status 'PASS' -Detail "IP $($vm.IP) responde a ping"
+    } else {
+        Write-Check -Name "$($vm.Name) - ICMP ping" -Status 'WARN' -Detail "IP $($vm.IP) sin respuesta ICMP (puede ser firewall del SO, pero TCP puede funcionar)"
+    }
+    # TCP por puerto
+    foreach ($port in $vm.Ports) {
+        $svc = switch ($port) { 8000 { 'FastAPI' } 8501 { 'Streamlit' } 22 { 'SSH' } default { "TCP $port" } }
+        $tcp = Test-TcpPort -HostName $vm.IP -Port $port
+        if ($tcp) {
+            Write-Check -Name "$($vm.Name) - TCP:$port ($svc)" -Status 'PASS' -Detail "$($vm.IP):$port alcanzable"
+        } else {
+            Write-Check -Name "$($vm.Name) - TCP:$port ($svc)" -Status 'FAIL' -Detail "$($vm.IP):$port NO alcanzable"
+        }
+    }
+}
+
+# -----------------------------------------------------------------
+# SECCION 6 - HUB: App Gateway
+# -----------------------------------------------------------------
+Write-Section '6. HUB - App Gateway interno TCP:80'
+
+$tcpAgw = Test-TcpPort -HostName $AppGwIp -Port 80
+if ($tcpAgw) {
+    Write-Check -Name "App Gateway TCP:80 ($AppGwIp)" -Status 'PASS' -Detail 'Listener HTTP alcanzable desde jumpbox'
+} else {
+    Write-Check -Name "App Gateway TCP:80 ($AppGwIp)" -Status 'FAIL' -Detail 'No alcanzable en TCP:80'
+}
+
+# Test HTTP completo a traves de App Gateway
+$agwHttp = Test-Http -Url "http://$AppGwIp/" -TimeoutSec 10
+if ($agwHttp.Ok) {
+    Write-Check -Name "App Gateway HTTP GET /" -Status 'PASS' -Detail "HTTP $($agwHttp.Code)"
+} else {
+    Write-Check -Name "App Gateway HTTP GET /" -Status 'WARN' -Detail "HTTP $($agwHttp.Code) | $($agwHttp.Body)"
+}
+
+# -----------------------------------------------------------------
+# SECCION 7 - KEY VAULT Private Endpoint
+# -----------------------------------------------------------------
+Write-Section '7. KEY VAULT - Private Endpoint TCP:443'
+
+$kvDns = "${key_vault_name}.vault.azure.net"
+$kvDnsResult = Test-DnsResolve -Name $kvDns
+if ($kvDnsResult.Ok) {
+    Write-Check -Name "Key Vault DNS ($kvDns)" -Status 'PASS' -Detail "Resuelve a: $($kvDnsResult.IPs)"
+    $kvTcp = Test-TcpPort -HostName $kvDns -Port 443
+    if ($kvTcp) {
+        Write-Check -Name "Key Vault TCP:443" -Status 'PASS' -Detail 'Private Endpoint alcanzable'
+    } else {
+        Write-Check -Name "Key Vault TCP:443" -Status 'FAIL' -Detail 'No alcanzable - revisar PE y NSG'
+    }
+} else {
+    Write-Check -Name "Key Vault DNS ($kvDns)" -Status 'WARN' -Detail "DNS no resuelve: $($kvDnsResult.Msg)"
+}
+
+# -----------------------------------------------------------------
+# SECCION 8 - DIAGNOSTICO DE RED DEL SISTEMA
+# -----------------------------------------------------------------
+Write-Section '8. INFORMACION DE RED - Jumpbox'
+
+try {
+    $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+    foreach ($a in $adapters) {
+        $ips = (Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
+        Log "  Adaptador   : $($a.Name)  ($($a.InterfaceDescription))"
+        Log "  IP          : $($ips -join ', ')"
+    }
+    $dnsServers = (Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                   Select-Object -ExpandProperty ServerAddresses | Sort-Object -Unique) -join ', '
+    Log "  DNS servers : $dnsServers"
+    $defaultGw  = (Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+                   Select-Object -First 1).NextHop
+    Log "  Default GW  : $defaultGw"
+    $osCaption  = (Get-CimInstance Win32_OperatingSystem).Caption
+    $uptime     = (Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+    Log "  OS          : $osCaption"
+    Log "  Uptime      : $($uptime.Days)d $($uptime.Hours)h $($uptime.Minutes)m"
+} catch {
+    Log "  (Error al leer informacion de red: $($_.Exception.Message))"
+}
+
+# -----------------------------------------------------------------
+# SECCION 9 - TABLA DE RUTAS EFECTIVAS
+# -----------------------------------------------------------------
+Write-Section '9. RUTAS DE RED - Tabla de rutas activas en la jumpbox'
+
+try {
+    $routes = Get-NetRoute -AddressFamily IPv4 | Where-Object { $_.DestinationPrefix -ne '255.255.255.255/32' } |
+              Sort-Object -Property RouteMetric |
+              Select-Object DestinationPrefix, NextHop, RouteMetric, InterfaceAlias |
+              Format-Table -AutoSize | Out-String
+    Log $routes
+} catch {
+    Log "  (Error al leer tabla de rutas: $($_.Exception.Message))"
+}
+
+# -----------------------------------------------------------------
+# SECCION 10 - TRACEROUTE A DESTINOS CLAVE
+# -----------------------------------------------------------------
+Write-Section '10. TRACEROUTE - Camino a destinos clave (max 10 saltos)'
+
+$traceTargets = @(
+    @{ Host = $AppGwIp;       Label = 'App Gateway' }
+    @{ Host = $MysqlAppHost;  Label = 'MySQL app' }
+    @{ Host = $EtlIp;         Label = 'ETL VM' }
+    @{ Host = $DashboardIp;   Label = 'Dashboard VM' }
+)
+
+foreach ($t in $traceTargets) {
+    Log "`n  >> tracert $($t.Label) ($($t.Host))"
+    try {
+        $tr = & tracert -d -h 10 -w 1000 $t.Host 2>&1
+        $tr | ForEach-Object { Log "     $_" }
+    } catch {
+        Log "     (tracert no disponible: $($_.Exception.Message))"
+    }
+}
+
+# =================================================================
+# RESUMEN FINAL
+# =================================================================
+$duration = (Get-Date) - $startTime
+Write-Section "RESUMEN FINAL  (duracion: $($duration.TotalSeconds.ToString('F1')) s)"
+
+$total = $Passed + $Failed + $Warned
+Log "  Total checks : $total"
+Log "  PASS  [OK]      : $Passed"
+Log "  FAIL  [FAIL]      : $Failed"
+Log "  WARN  !      : $Warned"
+Log ''
+
+if ($Failed -gt 0) {
+    Log '  ---- CHECKS FALLIDOS ----------------------------------------'
+    $Results | Where-Object { $_.Status -eq 'FAIL' } | ForEach-Object {
+        Log "  [[FAIL]] $($_.Name)"
+        Log "      $($_.Detail)"
+    }
+    Log ''
+}
+
+if ($Warned -gt 0) {
+    Log '  ---- ADVERTENCIAS -------------------------------------------'
+    $Results | Where-Object { $_.Status -eq 'WARN' } | ForEach-Object {
+        Log "  [!] $($_.Name)"
+        Log "      $($_.Detail)"
+    }
+    Log ''
+}
+
+$statusIcon = if ($Failed -gt 0) { 'CON ERRORES' } elseif ($Warned -gt 0) { 'CON ADVERTENCIAS' } else { 'SALUDABLE' }
+Log "  Estado global  : $statusIcon"
+Log "  Log completo   : $LogFile"
+Log "  JSON           : $JsonFile"
+Log '================================================================'
+
+# Exportar resultados estructurados a JSON
+@{
+    timestamp    = $startTime.ToString('o')
+    duration_sec = $duration.TotalSeconds
+    host         = $env:COMPUTERNAME
+    resource_group = $RgName
+    summary      = @{ total = $total; pass = $Passed; fail = $Failed; warn = $Warned; status = $statusIcon }
+    checks       = $Results
+} | ConvertTo-Json -Depth 5 | Set-Content -Path $JsonFile -Encoding UTF8
+
+# Copiar log al escritorio publico para facil acceso via Bastion
+Copy-Item -Path $LogFile -Destination "C:\Users\Public\Desktop\diag-$Timestamp.txt" -ErrorAction SilentlyContinue
+Copy-Item -Path $JsonFile -Destination "C:\Users\Public\Desktop\diag-$Timestamp.json" -ErrorAction SilentlyContinue
+
+Write-Host "`n  Archivos guardados en C:\diag\ y en el Escritorio Publico" -ForegroundColor Cyan
+
+exit $(if ($Failed -gt 0) { 1 } else { 0 })

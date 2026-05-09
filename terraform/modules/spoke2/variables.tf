@@ -21,6 +21,7 @@ variable "config" {
     private_endpoint_subnet_prefix = string
     mysql_sku_name                 = string
     mysql_version                  = string
+    mysql_zone                     = string
     mysql_storage_gb               = number
     mysql_backup_retention_days    = number
     app_database_name              = string
@@ -35,6 +36,10 @@ variable "hub_vnet_id" {
 
 variable "hub_vnet_name" {
   type = string
+}
+
+variable "use_remote_gateways" {
+  type = bool
 }
 
 variable "mysql_private_dns_zone_id" {
@@ -56,4 +61,24 @@ variable "mysql_administrator_password" {
 
 variable "storage_account_name" {
   type = string
+}
+
+variable "spoke1_app_service_subnet_prefix" {
+  type        = string
+  description = "CIDR del subnet de VNet integration de Spoke 1 (App Services). Permite MySQL inbound desde las apps."
+}
+
+variable "spoke3_etl_subnet_prefix" {
+  type        = string
+  description = "CIDR del subnet ETL de Spoke 3. Permite MySQL inbound desde el ETL runner."
+}
+
+variable "spoke3_dashboard_subnet_prefix" {
+  type        = string
+  description = "CIDR del subnet Dashboard de Spoke 3. Permite MySQL inbound desde el dashboard."
+}
+
+variable "hub_management_subnet_prefix" {
+  type        = string
+  description = "CIDR del hub management subnet (Jumpbox). Permite MySQL inbound para administración."
 }

@@ -22,6 +22,18 @@ output "key_vault_id" {
   value = azurerm_key_vault.main.id
 }
 
+output "key_vault_name" {
+  value = azurerm_key_vault.main.name
+}
+
 output "application_gateway_private_ip" {
   value = var.application_gateway.private_ip_address
+}
+
+output "jumpbox_name" {
+  value = try(azurerm_windows_virtual_machine.jumpbox[0].name, null)
+}
+
+output "jumpbox_private_ip" {
+  value = try(azurerm_network_interface.jumpbox[0].private_ip_address, null)
 }

@@ -31,7 +31,7 @@ Aplica a todos los recursos de la solucion Hub-Spoke, incluyendo red, App Servic
 
 ## Implementacion actual
 
-En el estado actual del repositorio no se incluye aun la carpeta de Terraform. Cuando la infraestructura se incorpore al workspace, las etiquetas deben consolidarse en el punto de entrada del ambiente y propagarse a todos los modulos antes de crear recursos.
+La infraestructura se incorpora en la carpeta `terraform/`. El punto de entrada mantiene `locals.default_tags` con las etiquetas obligatorias y propaga el mapa consolidado a los modulos `hub`, `spoke1`, `spoke2` y `spoke3` antes de crear recursos.
 
 ## Prechequeo antes del despliegue
 

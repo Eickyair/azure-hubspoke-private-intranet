@@ -1,3 +1,7 @@
+output "vnet_id" {
+  value = azurerm_virtual_network.spoke.id
+}
+
 output "default_hostnames" {
   value = {
     webapp = azurerm_linux_web_app.webapp.default_hostname

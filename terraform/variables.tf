@@ -60,12 +60,17 @@ variable "hub" {
     bastion_subnet_prefix                 = string
     edge_subnet_prefix                    = string
     shared_private_endpoint_subnet_prefix = string
+    management_subnet_prefix              = string
     p2s_address_space                     = list(string)
     enable_vpn_gateway                    = bool
     vpn_root_certificate_name             = string
     vpn_root_certificate_data             = string
     enable_application_gateway            = bool
     application_gateway_private_ip        = string
+    enable_test_vm                        = bool
+    grant_test_vm_rbac                    = bool
+    jumpbox_private_ip                    = string
+    jumpbox_vm_size                       = string
   })
   default = {
     address_space                         = ["10.10.0.0/16"]
@@ -73,12 +78,17 @@ variable "hub" {
     bastion_subnet_prefix                 = "10.10.1.0/26"
     edge_subnet_prefix                    = "10.10.2.0/24"
     shared_private_endpoint_subnet_prefix = "10.10.3.0/24"
+    management_subnet_prefix              = "10.10.4.0/24"
     p2s_address_space                     = ["172.16.10.0/24"]
     enable_vpn_gateway                    = true
     vpn_root_certificate_name             = "p2s-root-cert"
     vpn_root_certificate_data             = ""
     enable_application_gateway            = true
     application_gateway_private_ip        = "10.10.2.10"
+    enable_test_vm                        = true
+    grant_test_vm_rbac                    = false
+    jumpbox_private_ip                    = "10.10.4.10"
+    jumpbox_vm_size                       = "Standard_B2ls_v2"
   }
 }
 
@@ -90,7 +100,6 @@ variable "spoke1" {
     private_endpoint_subnet_prefix        = string
     app_service_plan_sku_name             = string
     public_network_access_enabled         = bool
-    deploy_source_zip                     = bool
   })
   default = {
     address_space                         = ["10.20.0.0/16"]
@@ -98,7 +107,6 @@ variable "spoke1" {
     private_endpoint_subnet_prefix        = "10.20.2.0/24"
     app_service_plan_sku_name             = "B1"
     public_network_access_enabled         = false
-    deploy_source_zip                     = false
   }
 }
 
@@ -110,6 +118,7 @@ variable "spoke2" {
     private_endpoint_subnet_prefix = string
     mysql_sku_name                 = string
     mysql_version                  = string
+    mysql_zone                     = string
     mysql_storage_gb               = number
     mysql_backup_retention_days    = number
     app_database_name              = string
@@ -122,6 +131,7 @@ variable "spoke2" {
     private_endpoint_subnet_prefix = "10.30.2.0/24"
     mysql_sku_name                 = "B_Standard_B1ms"
     mysql_version                  = "8.0.21"
+    mysql_zone                     = "2"
     mysql_storage_gb               = 20
     mysql_backup_retention_days    = 7
     app_database_name              = "intranet_app"
@@ -142,6 +152,7 @@ variable "spoke3" {
     vm_size                     = string
     mysql_sku_name              = string
     mysql_version               = string
+    mysql_zone                  = string
     mysql_storage_gb            = number
     mysql_backup_retention_days = number
     analytics_database_name     = string
@@ -153,9 +164,10 @@ variable "spoke3" {
     mysql_subnet_prefix         = "10.40.3.0/24"
     etl_private_ip              = "10.40.1.20"
     dashboard_private_ip        = "10.40.2.20"
-    vm_size                     = "Standard_B1s"
+    vm_size                     = "Standard_B2ls_v2"
     mysql_sku_name              = "B_Standard_B1ms"
     mysql_version               = "8.0.21"
+    mysql_zone                  = "2"
     mysql_storage_gb            = 20
     mysql_backup_retention_days = 7
     analytics_database_name     = "intranet_analytics"
@@ -184,4 +196,18 @@ variable "vm_admin_ssh_public_key" {
   description = "Llave publica SSH para administrar las VMs privadas por Bastion."
   type        = string
   sensitive   = true
+}
+
+variable "jumpbox_admin_username" {
+  description = "Usuario administrador Windows para la VM de validacion manual en el Hub."
+  type        = string
+  default     = "labadmin"
+}
+
+variable "jumpbox_admin_password" {
+  description = "Password administrador Windows para la VM de validacion manual en el Hub."
+  type        = string
+  sensitive   = true
+  default     = null
+  nullable    = true
 }

@@ -1,0 +1,22 @@
+# Python local artifacts
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated documentation artifacts
+docs/*.pdf
+
+# Terraform local artifacts
+terraform/.terraform/
+terraform/.terraform-build/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/main.tfvars
+terraform/crash.log
+terraform/crash.*.log
+terraform/tfplan
+terraform/tfplan-*
+terraform/*.tfplan
+terraform/diagnostics.ps1
+terraform/diagnostics-output.txt

@@ -136,3 +136,8 @@ def index() -> str:
 def health() -> JSONResponse:
     payload = health_payload()
     return JSONResponse(payload, status_code=200 if payload["status"] == "ok" else 503)
+
+
+@app.get("/live")
+def live() -> dict:
+  return {"service": SERVICE_NAME, "status": "ok", "checked_at": utc_now()}

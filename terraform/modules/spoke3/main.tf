@@ -43,7 +43,7 @@ resource "azurerm_virtual_network_peering" "hub_to_spoke" {
   remote_virtual_network_id    = azurerm_virtual_network.spoke.id
   allow_virtual_network_access = true
   allow_forwarded_traffic      = true
-  allow_gateway_transit        = true
+  allow_gateway_transit        = var.use_remote_gateways
 }
 
 resource "azurerm_virtual_network_peering" "spoke_to_hub" {
@@ -53,7 +53,7 @@ resource "azurerm_virtual_network_peering" "spoke_to_hub" {
   remote_virtual_network_id    = var.hub_vnet_id
   allow_virtual_network_access = true
   allow_forwarded_traffic      = true
-  use_remote_gateways          = true
+  use_remote_gateways          = var.use_remote_gateways
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "mysql" {
@@ -71,27 +71,66 @@ resource "azurerm_network_security_group" "etl" {
   resource_group_name = var.resource_group_name
   tags                = var.tags
 
+  # El Dashboard llama al healthcheck del ETL en :8000
   security_rule {
-    name                       = "AllowVNetFastApi"
+    name                       = "AllowDashboardFastApi"
     priority                   = 100
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "8000"
-    source_address_prefix      = "VirtualNetwork"
+    source_address_prefix      = var.config.dashboard_subnet_prefix
     destination_address_prefix = "*"
   }
 
+  # Jumpbox puede llamar la API del ETL para pruebas
   security_rule {
-    name                       = "AllowVNetSshForBastion"
+    name                       = "AllowJumpboxFastApi"
     priority                   = 110
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
+    destination_port_range     = "8000"
+    source_address_prefix      = var.hub_management_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  # SSH desde Azure Bastion y Jumpbox de validacion
+  security_rule {
+    name                       = "AllowJumpboxSsh"
+    priority                   = 115
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
     destination_port_range     = "22"
-    source_address_prefix      = "VirtualNetwork"
+    source_address_prefix      = var.hub_management_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowBastionSsh"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = var.hub_bastion_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
     destination_address_prefix = "*"
   }
 }
@@ -102,27 +141,108 @@ resource "azurerm_network_security_group" "dashboard" {
   resource_group_name = var.resource_group_name
   tags                = var.tags
 
+  # Solo el Jumpbox accede al dashboard Streamlit por DNS privado
   security_rule {
-    name                       = "AllowVNetStreamlit"
+    name                       = "AllowJumpboxStreamlit"
     priority                   = 100
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "8501"
-    source_address_prefix      = "VirtualNetwork"
+    source_address_prefix      = var.hub_management_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  # SSH desde Azure Bastion y Jumpbox de validacion
+  security_rule {
+    name                       = "AllowJumpboxSsh"
+    priority                   = 105
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = var.hub_management_subnet_prefix
     destination_address_prefix = "*"
   }
 
   security_rule {
-    name                       = "AllowVNetSshForBastion"
+    name                       = "AllowBastionSsh"
     priority                   = 110
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "22"
-    source_address_prefix      = "VirtualNetwork"
+    source_address_prefix      = var.hub_bastion_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_network_security_group" "mysql" {
+  name                = "nsg-${var.name_prefix}-spoke3-mysql"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  security_rule {
+    name                       = "AllowEtlMySQL"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3306"
+    source_address_prefix      = var.config.etl_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowDashboardMySQL"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3306"
+    source_address_prefix      = var.config.dashboard_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowJumpboxMySQL"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3306"
+    source_address_prefix      = var.hub_management_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
     destination_address_prefix = "*"
   }
 }
@@ -137,6 +257,11 @@ resource "azurerm_subnet_network_security_group_association" "dashboard" {
   network_security_group_id = azurerm_network_security_group.dashboard.id
 }
 
+resource "azurerm_subnet_network_security_group_association" "mysql" {
+  subnet_id                 = azurerm_subnet.mysql.id
+  network_security_group_id = azurerm_network_security_group.mysql.id
+}
+
 resource "azurerm_mysql_flexible_server" "analytics" {
   name                   = "mysql-${var.name_prefix}-analytics"
   location               = var.location
@@ -148,6 +273,7 @@ resource "azurerm_mysql_flexible_server" "analytics" {
   private_dns_zone_id    = var.mysql_private_dns_zone_id
   sku_name               = var.config.mysql_sku_name
   version                = var.config.mysql_version
+  zone                   = var.config.mysql_zone
   tags                   = var.tags
 
   storage {

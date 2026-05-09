@@ -26,8 +26,9 @@ Antes del `plan`, ajustar en `main.tfvars`:
 
 - `resource_group_name`, si el equipo necesita otro nombre.
 - `unique_suffix`, si algun App Service o Storage Account ya existe globalmente.
-- `hub.vpn_root_certificate_data`, con el certificado raiz publico para VPN P2S.
+- `hub.vpn_root_certificate_data`, con el certificado raiz publico para VPN P2S si se habilita la VPN.
 - `mysql_administrator_password` y `vm_admin_ssh_public_key`.
+- `jumpbox_admin_password`, si se desea un password distinto al de MySQL para la VM Windows de validacion.
 
 ## Codigo fuente de aplicaciones
 
@@ -37,7 +38,17 @@ Antes del `plan`, ajustar en `main.tfvars`:
 - `../src/spoke3/etl-runner/main.py`: health endpoint del ETL privado.
 - `../src/spoke3/dashboard/main.py`: dashboard Streamlit para visualizar estado de analitica.
 
-Por defecto `spoke1.deploy_source_zip = false` porque los App Services quedan privados. Si el runner de Terraform tiene acceso al endpoint SCM/Kudu por red privada, se puede activar para empaquetar `src/spoke1/*` como zip durante el apply.
+El despliegue de `src/spoke1/*` usa paquetes ZIP preconstruidos con dependencias Python 3.11 dentro de `packages/`, publicados en el Storage Account de paquetes y consumidos con `WEBSITE_RUN_FROM_PACKAGE`. El startup agrega `/home/site/wwwroot/packages` a `PYTHONPATH` y ejecuta Uvicorn, evitando tanto `pip install` en cada arranque como builds Oryx lentos en Kudu.
+
+Antes de ejecutar `terraform plan` o `terraform apply`, generar los paquetes preconstruidos:
+
+```bash
+../scripts/build-spoke1-prebuilts.sh
+```
+
+El script crea los ZIP en `terraform/.terraform-build/prebuilt/` con nombres `webapp-prebuilt-<hash>.zip`, `admin-prebuilt-<hash>.zip` y `api-prebuilt-<hash>.zip`. Esa carpeta es un artefacto local ignorado por Git; Terraform toma esos archivos y los publica en el Storage Account de paquetes.
+
+Se agrega tambien una VM Windows privada en el Hub para validacion manual por Azure Bastion. La VM deja en el escritorio un archivo `Private-Intranet-Checks.txt` con URLs internas y comandos utiles, e instala Azure CLI para usar la identidad administrada asignada al Resource Group.
 
 ## Notas de seguridad
 
@@ -46,4 +57,5 @@ Por defecto `spoke1.deploy_source_zip = false` porque los App Services quedan pr
 - MySQL Flexible Server se despliega con acceso privado por subnet delegada.
 - Storage Account se despliega sin acceso publico y con Private Endpoint para Blob.
 - Las VMs de Spoke 3 no tienen IP publica y se administran por Bastion.
+- La VM Windows de validacion en el Hub tampoco tiene IP publica; el acceso se hace por Azure Bastion con RDP privado.
 - Los secretos en variables sensibles siguen existiendo en el estado de Terraform; para produccion conviene moverlos a Key Vault y usar referencias administradas.

@@ -2,6 +2,10 @@ variable "resource_group_name" {
   type = string
 }
 
+variable "resource_group_id" {
+  type = string
+}
+
 variable "location" {
   type = string
 }
@@ -25,12 +29,17 @@ variable "config" {
     bastion_subnet_prefix                 = string
     edge_subnet_prefix                    = string
     shared_private_endpoint_subnet_prefix = string
+    management_subnet_prefix              = string
     p2s_address_space                     = list(string)
     enable_vpn_gateway                    = bool
     vpn_root_certificate_name             = string
     vpn_root_certificate_data             = string
     enable_application_gateway            = bool
     application_gateway_private_ip        = string
+    enable_test_vm                        = bool
+    grant_test_vm_rbac                    = bool
+    jumpbox_private_ip                    = string
+    jumpbox_vm_size                       = string
   })
 }
 
@@ -61,4 +70,22 @@ variable "application_gateway" {
       priority     = number
     }))
   })
+}
+
+variable "internal_urls" {
+  type = object({
+    intranet  = string
+    admin     = string
+    api       = string
+    analytics = string
+  })
+}
+
+variable "jumpbox_admin_username" {
+  type = string
+}
+
+variable "jumpbox_admin_password" {
+  type      = string
+  sensitive = true
 }

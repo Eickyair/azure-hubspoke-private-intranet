@@ -21,7 +21,6 @@ variable "config" {
     private_endpoint_subnet_prefix        = string
     app_service_plan_sku_name             = string
     public_network_access_enabled         = bool
-    deploy_source_zip                     = bool
   })
 }
 
@@ -41,8 +40,26 @@ variable "hub_vnet_name" {
   type = string
 }
 
+variable "use_remote_gateways" {
+  type = bool
+}
+
 variable "app_service_private_dns_zone_id" {
   type = string
+}
+
+variable "internal_dns_zone_name" {
+  type = string
+}
+
+variable "hub_edge_subnet_prefix" {
+  type        = string
+  description = "CIDR del hub edge subnet (App Gateway) para permitir acceso HTTPS a los Private Endpoints."
+}
+
+variable "hub_management_subnet_prefix" {
+  type        = string
+  description = "CIDR del hub management subnet (Jumpbox) para permitir acceso HTTPS a los Private Endpoints."
 }
 
 variable "source_paths" {

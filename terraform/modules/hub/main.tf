@@ -7,6 +7,16 @@ locals {
   }
 
   application_gateway_backends = var.application_gateway.enabled ? var.application_gateway.backends : {}
+
+  key_vault_name = substr(lower("kv${replace(var.name_prefix, "-", "")}${substr(md5(var.resource_group_name), 0, 6)}"), 0, 24)
+
+  jumpbox_bootstrap_script_b64 = base64encode(templatefile("${path.module}/jumpbox-init.ps1.tftpl", {
+    intranet_url        = var.internal_urls.intranet
+    admin_url           = var.internal_urls.admin
+    api_url             = var.internal_urls.api
+    analytics_url       = var.internal_urls.analytics
+    resource_group_name = var.resource_group_name
+  }))
 }
 
 resource "azurerm_virtual_network" "hub" {
@@ -29,6 +39,8 @@ resource "azurerm_subnet" "bastion" {
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.hub.name
   address_prefixes     = [var.config.bastion_subnet_prefix]
+
+  depends_on = [azurerm_subnet.gateway]
 }
 
 resource "azurerm_subnet" "edge" {
@@ -36,6 +48,8 @@ resource "azurerm_subnet" "edge" {
   resource_group_name  = var.resource_group_name
   virtual_network_name = azurerm_virtual_network.hub.name
   address_prefixes     = [var.config.edge_subnet_prefix]
+
+  depends_on = [azurerm_subnet.bastion]
 }
 
 resource "azurerm_subnet" "shared_private_endpoint" {
@@ -44,6 +58,17 @@ resource "azurerm_subnet" "shared_private_endpoint" {
   virtual_network_name              = azurerm_virtual_network.hub.name
   address_prefixes                  = [var.config.shared_private_endpoint_subnet_prefix]
   private_endpoint_network_policies = "Disabled"
+
+  depends_on = [azurerm_subnet.edge]
+}
+
+resource "azurerm_subnet" "management" {
+  name                 = "snet-${var.name_prefix}-hub-mgmt"
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = azurerm_virtual_network.hub.name
+  address_prefixes     = [var.config.management_subnet_prefix]
+
+  depends_on = [azurerm_subnet.shared_private_endpoint]
 }
 
 resource "azurerm_private_dns_zone" "shared" {
@@ -98,7 +123,7 @@ resource "azurerm_log_analytics_workspace" "main" {
 }
 
 resource "azurerm_key_vault" "main" {
-  name                          = substr(replace("kv-${var.name_prefix}", "-", ""), 0, 24)
+  name                          = local.key_vault_name
   location                      = var.location
   resource_group_name           = var.resource_group_name
   tenant_id                     = var.tenant_id
@@ -106,7 +131,7 @@ resource "azurerm_key_vault" "main" {
   enable_rbac_authorization     = true
   public_network_access_enabled = false
   soft_delete_retention_days    = 7
-  purge_protection_enabled      = false
+  purge_protection_enabled      = true
   tags                          = var.tags
 }
 
@@ -158,6 +183,104 @@ resource "azurerm_bastion_host" "main" {
   }
 }
 
+resource "azurerm_network_security_group" "management" {
+  count               = var.config.enable_test_vm ? 1 : 0
+  name                = "nsg-${var.name_prefix}-hub-mgmt"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  security_rule {
+    name                       = "AllowBastionRdp"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3389"
+    source_address_prefix      = var.config.bastion_subnet_prefix
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "management" {
+  count                     = var.config.enable_test_vm ? 1 : 0
+  subnet_id                 = azurerm_subnet.management.id
+  network_security_group_id = azurerm_network_security_group.management[0].id
+}
+
+resource "azurerm_network_interface" "jumpbox" {
+  count               = var.config.enable_test_vm ? 1 : 0
+  name                = "nic-${var.name_prefix}-jumpbox"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  ip_configuration {
+    name                          = "ipconfig1"
+    subnet_id                     = azurerm_subnet.management.id
+    private_ip_address_allocation = "Static"
+    private_ip_address            = var.config.jumpbox_private_ip
+  }
+}
+
+resource "azurerm_windows_virtual_machine" "jumpbox" {
+  count                 = var.config.enable_test_vm ? 1 : 0
+  name                  = "vm-${var.name_prefix}-jumpbox-01"
+  computer_name         = "jumpbox01"
+  location              = var.location
+  resource_group_name   = var.resource_group_name
+  size                  = var.config.jumpbox_vm_size
+  admin_username        = var.jumpbox_admin_username
+  admin_password        = var.jumpbox_admin_password
+  network_interface_ids = [azurerm_network_interface.jumpbox[0].id]
+  provision_vm_agent    = true
+  tags                  = var.tags
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "MicrosoftWindowsServer"
+    offer     = "WindowsServer"
+    sku       = "2022-datacenter-azure-edition"
+    version   = "latest"
+  }
+}
+
+resource "azurerm_virtual_machine_extension" "jumpbox_init" {
+  count                = var.config.enable_test_vm ? 1 : 0
+  name                 = "vmext-${var.name_prefix}-jumpbox-init"
+  virtual_machine_id   = azurerm_windows_virtual_machine.jumpbox[0].id
+  publisher            = "Microsoft.Compute"
+  type                 = "CustomScriptExtension"
+  type_handler_version = "1.10"
+
+  settings = jsonencode({
+    commandToExecute = "powershell -ExecutionPolicy Bypass -Command \"[IO.File]::WriteAllText('C:\\\\Windows\\\\Temp\\\\jumpbox-init.ps1',[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${local.jumpbox_bootstrap_script_b64}'))); & 'C:\\\\Windows\\\\Temp\\\\jumpbox-init.ps1'\""
+  })
+}
+
+resource "azurerm_role_assignment" "jumpbox_contributor" {
+  count                = var.config.enable_test_vm && var.config.grant_test_vm_rbac ? 1 : 0
+  scope                = var.resource_group_id
+  role_definition_name = "Contributor"
+  principal_id         = azurerm_windows_virtual_machine.jumpbox[0].identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "jumpbox_key_vault_admin" {
+  count                = var.config.enable_test_vm && var.config.grant_test_vm_rbac ? 1 : 0
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Administrator"
+  principal_id         = azurerm_windows_virtual_machine.jumpbox[0].identity[0].principal_id
+}
+
 resource "azurerm_public_ip" "vpn" {
   count               = var.config.enable_vpn_gateway ? 1 : 0
   name                = "pip-${var.name_prefix}-vpn"
@@ -203,17 +326,53 @@ resource "azurerm_virtual_network_gateway" "vpn" {
   }
 }
 
+resource "azurerm_web_application_firewall_policy" "main" {
+  count               = var.application_gateway.enabled ? 1 : 0
+  name                = "waf-${var.name_prefix}-agw"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  tags                = var.tags
+
+  policy_settings {
+    enabled = true
+    mode    = "Prevention"
+  }
+
+  managed_rules {
+    managed_rule_set {
+      type    = "OWASP"
+      version = "3.2"
+    }
+  }
+}
+
+resource "azurerm_public_ip" "application_gateway" {
+  count               = var.application_gateway.enabled ? 1 : 0
+  name                = "pip-${var.name_prefix}-agw"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  tags                = var.tags
+}
+
 resource "azurerm_application_gateway" "main" {
   count               = var.application_gateway.enabled ? 1 : 0
   name                = "agw-${var.name_prefix}-private"
   location            = var.location
   resource_group_name = var.resource_group_name
+  firewall_policy_id  = azurerm_web_application_firewall_policy.main[0].id
   tags                = var.tags
 
   sku {
     name     = "WAF_v2"
     tier     = "WAF_v2"
     capacity = 1
+  }
+
+  ssl_policy {
+    policy_type = "Predefined"
+    policy_name = "AppGwSslPolicy20220101"
   }
 
   gateway_ip_configuration {
@@ -226,6 +385,11 @@ resource "azurerm_application_gateway" "main" {
     subnet_id                     = azurerm_subnet.edge.id
     private_ip_address            = var.application_gateway.private_ip_address
     private_ip_address_allocation = "Static"
+  }
+
+  frontend_ip_configuration {
+    name                 = "public-frontend"
+    public_ip_address_id = azurerm_public_ip.application_gateway[0].id
   }
 
   frontend_port {
@@ -246,7 +410,7 @@ resource "azurerm_application_gateway" "main" {
     content {
       name                                      = "probe-${probe.key}"
       protocol                                  = "Https"
-      path                                      = "/health"
+      path                                      = "/live"
       interval                                  = 30
       timeout                                   = 30
       unhealthy_threshold                       = 3
@@ -288,12 +452,5 @@ resource "azurerm_application_gateway" "main" {
       backend_address_pool_name  = "be-${request_routing_rule.key}"
       backend_http_settings_name = "bhs-${request_routing_rule.key}"
     }
-  }
-
-  waf_configuration {
-    enabled          = true
-    firewall_mode    = "Prevention"
-    rule_set_type    = "OWASP"
-    rule_set_version = "3.2"
   }
 }

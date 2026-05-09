@@ -45,3 +45,13 @@ output "internal_urls" {
     analytics = "http://${var.internal_domains.analytics}:8501"
   }
 }
+
+output "jumpbox_access" {
+  description = "Datos de acceso para la VM Windows de validacion manual por Bastion."
+  value = {
+    vm_name    = module.hub.jumpbox_name
+    private_ip = module.hub.jumpbox_private_ip
+    username   = var.jumpbox_admin_username
+    bastion    = "Usar Azure Bastion en el Resource Group para abrir RDP privado"
+  }
+}

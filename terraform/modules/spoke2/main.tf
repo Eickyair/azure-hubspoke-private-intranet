@@ -22,6 +22,78 @@ resource "azurerm_subnet" "mysql" {
   }
 }
 
+resource "azurerm_network_security_group" "mysql" {
+  name                = "nsg-${var.name_prefix}-spoke2-mysql"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  security_rule {
+    name                       = "AllowSpoke1AppServiceMySQL"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3306"
+    source_address_prefix      = var.spoke1_app_service_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowSpoke3EtlMySQL"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3306"
+    source_address_prefix      = var.spoke3_etl_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowSpoke3DashboardMySQL"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3306"
+    source_address_prefix      = var.spoke3_dashboard_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowJumpboxMySQL"
+    priority                   = 130
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3306"
+    source_address_prefix      = var.hub_management_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "mysql" {
+  subnet_id                 = azurerm_subnet.mysql.id
+  network_security_group_id = azurerm_network_security_group.mysql.id
+}
+
 resource "azurerm_subnet" "private_endpoint" {
   name                              = "snet-${var.name_prefix}-spoke2-pe"
   resource_group_name               = var.resource_group_name
@@ -37,7 +109,7 @@ resource "azurerm_virtual_network_peering" "hub_to_spoke" {
   remote_virtual_network_id    = azurerm_virtual_network.spoke.id
   allow_virtual_network_access = true
   allow_forwarded_traffic      = true
-  allow_gateway_transit        = true
+  allow_gateway_transit        = var.use_remote_gateways
 }
 
 resource "azurerm_virtual_network_peering" "spoke_to_hub" {
@@ -47,7 +119,7 @@ resource "azurerm_virtual_network_peering" "spoke_to_hub" {
   remote_virtual_network_id    = var.hub_vnet_id
   allow_virtual_network_access = true
   allow_forwarded_traffic      = true
-  use_remote_gateways          = true
+  use_remote_gateways          = var.use_remote_gateways
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "mysql" {
@@ -79,6 +151,7 @@ resource "azurerm_mysql_flexible_server" "app" {
   private_dns_zone_id    = var.mysql_private_dns_zone_id
   sku_name               = var.config.mysql_sku_name
   version                = var.config.mysql_version
+  zone                   = var.config.mysql_zone
   tags                   = var.tags
 
   storage {
@@ -99,6 +172,7 @@ resource "azurerm_mysql_flexible_server" "admin" {
   private_dns_zone_id    = var.mysql_private_dns_zone_id
   sku_name               = var.config.mysql_sku_name
   version                = var.config.mysql_version
+  zone                   = var.config.mysql_zone
   tags                   = var.tags
 
   storage {
@@ -143,10 +217,16 @@ resource "azurerm_storage_account" "documents" {
   }
 }
 
-resource "azurerm_storage_container" "documents" {
-  name                  = var.config.storage_container_name
-  storage_account_name  = azurerm_storage_account.documents.name
-  container_access_type = "private"
+resource "azapi_resource" "documents_container" {
+  type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2023-01-01"
+  name      = var.config.storage_container_name
+  parent_id = "${azurerm_storage_account.documents.id}/blobServices/default"
+
+  body = {
+    properties = {
+      publicAccess = "None"
+    }
+  }
 }
 
 resource "azurerm_private_endpoint" "blob" {

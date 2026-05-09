@@ -29,15 +29,20 @@ hub = {
   bastion_subnet_prefix                 = "10.10.1.0/26"
   edge_subnet_prefix                    = "10.10.2.0/24"
   shared_private_endpoint_subnet_prefix = "10.10.3.0/24"
+  management_subnet_prefix              = "10.10.4.0/24"
   p2s_address_space                     = ["172.16.10.0/24"]
 
-  # Colocar el certificado raiz publico base64 sin BEGIN/END CERTIFICATE.
-  enable_vpn_gateway        = true
+  # Opcional: habilitar solo cuando ya exista el certificado raiz publico base64.
+  enable_vpn_gateway        = false
   vpn_root_certificate_name = "p2s-root-cert"
   vpn_root_certificate_data = "REEMPLAZAR_CON_CERTIFICADO_RAIZ_PUBLICO_BASE64"
 
   enable_application_gateway     = true
   application_gateway_private_ip = "10.10.2.10"
+  enable_test_vm                 = true
+  grant_test_vm_rbac             = false
+  jumpbox_private_ip             = "10.10.4.10"
+  jumpbox_vm_size                = "Standard_B2ls_v2"
 }
 
 # Spoke 1: App Services privados de intranet, admin y API FastAPI.
@@ -47,7 +52,6 @@ spoke1 = {
   private_endpoint_subnet_prefix        = "10.20.2.0/24"
   app_service_plan_sku_name             = "B1"
   public_network_access_enabled         = false
-  deploy_source_zip                     = false
 }
 
 # Spoke 2: MySQL privado por subnet delegada y Blob Storage privado por Private Endpoint.
@@ -57,6 +61,7 @@ spoke2 = {
   private_endpoint_subnet_prefix = "10.30.2.0/24"
   mysql_sku_name                 = "B_Standard_B1ms"
   mysql_version                  = "8.0.21"
+  mysql_zone                     = "2"
   mysql_storage_gb               = 20
   mysql_backup_retention_days    = 7
   app_database_name              = "intranet_app"
@@ -72,9 +77,10 @@ spoke3 = {
   mysql_subnet_prefix         = "10.40.3.0/24"
   etl_private_ip              = "10.40.1.20"
   dashboard_private_ip        = "10.40.2.20"
-  vm_size                     = "Standard_B1s"
+  vm_size                     = "Standard_B2ls_v2"
   mysql_sku_name              = "B_Standard_B1ms"
   mysql_version               = "8.0.21"
+  mysql_zone                  = "2"
   mysql_storage_gb            = 20
   mysql_backup_retention_days = 7
   analytics_database_name     = "intranet_analytics"
@@ -86,3 +92,6 @@ mysql_administrator_password = "REEMPLAZAR_PASSWORD_SEGURO"
 
 vm_admin_username       = "azureuser"
 vm_admin_ssh_public_key = "ssh-rsa REEMPLAZAR_LLAVE_PUBLICA"
+
+jumpbox_admin_username = "labadmin"
+jumpbox_admin_password = "REEMPLAZAR_PASSWORD_RDP_SEGURO"

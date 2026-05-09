@@ -32,5 +32,5 @@ output "storage_primary_access_key" {
 }
 
 output "storage_container_name" {
-  value = azurerm_storage_container.documents.name
+  value = azapi_resource.documents_container.name
 }
