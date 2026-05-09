@@ -1,4 +1,5 @@
 import os
+from urllib.parse import quote_plus
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -6,7 +7,7 @@ class Settings(BaseSettings):
     
     # DB config
     mysql_host: str = os.getenv("MYSQL_APP_HOST", "")
-    mysql_user: str = os.getenv("MYSQL_APP_USERNAME", "")
+    mysql_user: str = os.getenv("MYSQL_APP_USER", os.getenv("MYSQL_APP_USERNAME", ""))
     mysql_password: str = os.getenv("MYSQL_APP_PASSWORD", "")
     mysql_database: str = os.getenv("MYSQL_APP_DATABASE", "catalog_db")
     mysql_port: int = int(os.getenv("MYSQL_PORT", "3306"))
@@ -23,7 +24,9 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         if self.mysql_host:
-            return f"mysql+pymysql://{self.mysql_user}:{self.mysql_password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
+            user = quote_plus(self.mysql_user)
+            password = quote_plus(self.mysql_password)
+            return f"mysql+pymysql://{user}:{password}@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
         return "sqlite:///./local_catalog.db"
 
 settings = Settings()

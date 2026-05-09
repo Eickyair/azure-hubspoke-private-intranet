@@ -26,9 +26,10 @@ variable "config" {
 
 variable "app_names" {
   type = object({
-    webapp = string
-    admin  = string
-    api    = string
+    webapp    = string
+    admin     = string
+    api       = string
+    admin_api = string
   })
 }
 
@@ -64,24 +65,28 @@ variable "hub_management_subnet_prefix" {
 
 variable "source_paths" {
   type = object({
-    webapp = string
-    admin  = string
-    api    = string
+    catalog_webapp = string
+    catalog_api    = string
+    admin_webapp   = string
+    admin_api      = string
   })
 }
 
 variable "app_environment" {
   type = object({
-    api_base_url         = string
-    mysql_app_host       = string
-    mysql_app_database   = string
-    mysql_admin_host     = string
-    mysql_admin_database = string
-    mysql_user           = string
-    mysql_password       = string
-    storage_account_url  = string
-    storage_account_key  = string
-    storage_container    = string
+    catalog_api_internal_url = string
+    catalog_api_external_url = string
+    admin_api_internal_url   = string
+    admin_api_external_url   = string
+    mysql_app_host           = string
+    mysql_app_database       = string
+    mysql_admin_host         = string
+    mysql_admin_database     = string
+    mysql_user               = string
+    mysql_password           = string
+    storage_account_url      = string
+    storage_account_key      = string
+    storage_container        = string
   })
   sensitive = true
 }

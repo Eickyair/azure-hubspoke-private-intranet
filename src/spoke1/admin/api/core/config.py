@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from urllib.parse import quote_plus
 
 class Settings(BaseSettings):
     SERVICE_NAME: str = "api-private"
@@ -15,7 +16,9 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         if self.MYSQL_APP_HOST:
-            return f"mysql+pymysql://{self.MYSQL_APP_USER}:{self.MYSQL_APP_PASSWORD}@{self.MYSQL_APP_HOST}:{self.MYSQL_PORT}/{self.MYSQL_APP_DATABASE}"
+            user = quote_plus(self.MYSQL_APP_USER)
+            password = quote_plus(self.MYSQL_APP_PASSWORD)
+            return f"mysql+pymysql://{user}:{password}@{self.MYSQL_APP_HOST}:{self.MYSQL_PORT}/{self.MYSQL_APP_DATABASE}"
         return "sqlite:///./local_mock.db"
 
     @property

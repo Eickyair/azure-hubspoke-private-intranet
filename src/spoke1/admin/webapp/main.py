@@ -1,7 +1,7 @@
 import os
 import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
@@ -32,4 +32,10 @@ def health():
         api_status = r.json()
     except Exception as e:
         api_status = {"status": "error", "error": str(e)}
-    return {"status": "ok", "service": SERVICE_NAME, "api_dependency": api_status}
+    status = "ok" if api_status.get("status") == "ok" else "degraded"
+    payload = {"status": status, "service": SERVICE_NAME, "api_dependency": api_status}
+    return JSONResponse(payload, status_code=200 if status == "ok" else 503)
+
+@app.get("/live")
+def live():
+    return {"service": SERVICE_NAME, "status": "ok"}

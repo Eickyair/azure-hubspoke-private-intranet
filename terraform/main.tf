@@ -23,9 +23,10 @@ locals {
   common_tags = merge(local.default_tags, var.tags)
 
   app_names = {
-    webapp = "app-${local.name_prefix}-intranet"
-    admin  = "app-${local.name_prefix}-admin"
-    api    = "app-${local.name_prefix}-api"
+    webapp    = "app-${local.name_prefix}-intranet"
+    admin     = "app-${local.name_prefix}-admin"
+    api       = "app-${local.name_prefix}-api"
+    admin_api = "app-${local.name_prefix}-admin-api"
   }
 
   storage_account_name = substr(lower(replace("st${var.project_slug}${var.environment}${var.unique_suffix}", "-", "")), 0, 24)
@@ -169,21 +170,25 @@ module "spoke1" {
   hub_edge_subnet_prefix          = var.hub.edge_subnet_prefix
   hub_management_subnet_prefix    = var.hub.management_subnet_prefix
   source_paths = {
-    webapp = abspath("${path.module}/../src/spoke1/webapp")
-    admin  = abspath("${path.module}/../src/spoke1/admin")
-    api    = abspath("${path.module}/../src/spoke1/api")
+    catalog_webapp = abspath("${path.module}/../src/spoke1/catalog/webapp")
+    catalog_api    = abspath("${path.module}/../src/spoke1/catalog/api")
+    admin_webapp   = abspath("${path.module}/../src/spoke1/admin/webapp")
+    admin_api      = abspath("${path.module}/../src/spoke1/admin/api")
   }
   app_environment = {
-    api_base_url         = "https://${local.app_names.api}.azurewebsites.net"
-    mysql_app_host       = module.spoke2.mysql_app_fqdn
-    mysql_app_database   = module.spoke2.mysql_app_database_name
-    mysql_admin_host     = module.spoke2.mysql_admin_fqdn
-    mysql_admin_database = module.spoke2.mysql_admin_database_name
-    mysql_user           = var.mysql_administrator_login
-    mysql_password       = var.mysql_administrator_password
-    storage_account_url  = module.spoke2.storage_primary_blob_endpoint
-    storage_account_key  = module.spoke2.storage_primary_access_key
-    storage_container    = module.spoke2.storage_container_name
+    catalog_api_internal_url = "https://${local.app_names.api}.azurewebsites.net"
+    catalog_api_external_url = "http://${var.internal_domains.api}/api"
+    admin_api_internal_url   = "https://${local.app_names.admin_api}.azurewebsites.net"
+    admin_api_external_url   = "https://${local.app_names.admin_api}.azurewebsites.net/api"
+    mysql_app_host           = module.spoke2.mysql_app_fqdn
+    mysql_app_database       = module.spoke2.mysql_app_database_name
+    mysql_admin_host         = module.spoke2.mysql_admin_fqdn
+    mysql_admin_database     = module.spoke2.mysql_admin_database_name
+    mysql_user               = var.mysql_administrator_login
+    mysql_password           = var.mysql_administrator_password
+    storage_account_url      = module.spoke2.storage_primary_blob_endpoint
+    storage_account_key      = module.spoke2.storage_primary_access_key
+    storage_container        = module.spoke2.storage_container_name
   }
 
   depends_on = [module.hub, module.spoke2]

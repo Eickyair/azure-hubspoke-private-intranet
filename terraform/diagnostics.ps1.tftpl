@@ -341,7 +341,9 @@ Write-Section '2. HTTP HEALTH CHECKS - App Services (via App Gateway interno)'
 # /live = health check de App Service; /health = endpoint de la API
 $httpEndpoints = @(
     @{ Url = "$UrlIntranet/live"; Label = 'Webapp Intranet  /live' }
+    @{ Url = "$UrlIntranet/health"; Label = 'Webapp Intranet  /health' }
     @{ Url = "$UrlAdmin/live";    Label = 'Webapp Admin      /live' }
+    @{ Url = "$UrlAdmin/health";  Label = 'Webapp Admin      /health' }
     @{ Url = $UrlApi;             Label = 'API FastAPI        /health' }
 )
 

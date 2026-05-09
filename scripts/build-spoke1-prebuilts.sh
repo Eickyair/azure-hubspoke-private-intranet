@@ -8,12 +8,19 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 TARGET_PLATFORM="${TARGET_PLATFORM:-manylinux2014_x86_64}"
 TARGET_PYTHON_VERSION="${TARGET_PYTHON_VERSION:-3.11}"
 
-services=(webapp admin api)
+services=(webapp api admin admin-api)
+
+declare -A SERVICE_PATHS=(
+  [webapp]="catalog/webapp"
+  [api]="catalog/api"
+  [admin]="admin/webapp"
+  [admin-api]="admin/api"
+)
 
 usage() {
   printf 'Usage: %s [service...]\n' "$(basename "$0")"
   printf '\nBuild prebuilt ZIP packages for spoke1 App Services.\n'
-  printf 'Default services: webapp admin api\n'
+  printf 'Default services: webapp api admin admin-api\n'
   printf '\nEnvironment overrides:\n'
   printf '  OUT_DIR=%s\n' "$OUT_DIR"
   printf '  PYTHON_BIN=%s\n' "$PYTHON_BIN"
@@ -38,45 +45,55 @@ require_command() {
   fi
 }
 
-hash_file() {
-  sha256sum "$1" | awk '{print $1}'
-}
-
 source_hash() {
   local service_dir="$1"
-  local main_hash requirements_hash startup_hash
+  (
+    cd "$service_dir"
+    local parts=()
+    local file
+    while IFS= read -r file; do
+      parts+=("${file#./}:$(sha256sum "$file" | awk '{print $1}')")
+    done < <(find . -type f \
+      ! -name 'Dockerfile' \
+      ! -name '*.pyc' \
+      ! -path '*/__pycache__/*' \
+      | LC_ALL=C sort)
 
-  main_hash="$(hash_file "$service_dir/main.py")"
-  requirements_hash="$(hash_file "$service_dir/requirements.txt")"
-
-  if [[ -f "$service_dir/startup.sh" ]]; then
-    startup_hash="$(hash_file "$service_dir/startup.sh")"
-  else
-    startup_hash=""
-  fi
-
-  printf '%s:%s:%s' "$main_hash" "$requirements_hash" "$startup_hash" | sha256sum | awk '{print $1}'
+    local joined
+    joined="$(IFS=:; printf '%s' "${parts[*]}")"
+    printf '%s' "$joined" | sha256sum | awk '{print $1}'
+  )
 }
 
 copy_source() {
   local service_dir="$1"
   local build_dir="$2"
-
-  cp "$service_dir/main.py" "$build_dir/main.py"
-  cp "$service_dir/requirements.txt" "$build_dir/requirements.txt"
-
-  if [[ -f "$service_dir/startup.sh" ]]; then
-    cp "$service_dir/startup.sh" "$build_dir/startup.sh"
-  fi
+  (
+    cd "$service_dir"
+    find . -type f \
+      ! -name 'Dockerfile' \
+      ! -name '*.pyc' \
+      ! -path '*/__pycache__/*' \
+      -print0 \
+      | while IFS= read -r -d '' file; do
+          install -D "$file" "$build_dir/${file#./}"
+        done
+  )
 }
 
 build_service() {
   local service="$1"
-  local service_dir="$SRC_ROOT/$service"
+  local relative_path="${SERVICE_PATHS[$service]:-}"
+  local service_dir="$SRC_ROOT/$relative_path"
   local hash build_dir package_name package_path package_size
 
-  if [[ ! -d "$service_dir" ]]; then
+  if [[ -z "$relative_path" || ! -d "$service_dir" ]]; then
     printf 'Unknown service: %s\n' "$service" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$service_dir/main.py" || ! -f "$service_dir/requirements.txt" ]]; then
+    printf 'Missing main.py or requirements.txt for %s at %s\n' "$service" "$service_dir" >&2
     exit 1
   fi
 
@@ -112,17 +129,18 @@ build_service() {
   )
 
   package_size="$(wc -c < "$package_path" | tr -d ' ')"
-  printf '%-6s %s %s %s\n' "$service" "$hash" "$package_size" "$package_path"
+  printf '%-9s %s %s %s\n' "$service" "$hash" "$package_size" "$package_path"
 }
 
 require_command sha256sum
 require_command awk
 require_command zip
+require_command install
 "$PYTHON_BIN" -m pip --version >/dev/null
 
 mkdir -p "$OUT_DIR"
-printf 'service hash                                                             bytes path\n'
-printf '%s\n' '------ ---------------------------------------------------------------- ----- ----'
+printf 'service   hash                                                             bytes path\n'
+printf '%s\n' '--------- ---------------------------------------------------------------- ----- ----'
 for service in "${services[@]}"; do
   build_service "$service"
 done

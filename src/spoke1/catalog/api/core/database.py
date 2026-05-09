@@ -14,7 +14,7 @@ else:
         SQLALCHEMY_DATABASE_URL,
         pool_recycle=3600,
         pool_pre_ping=True,
-        connect_args={"connect_timeout": 10}
+        connect_args={"connect_timeout": 10, "ssl": {"check_hostname": False}}
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -38,7 +38,11 @@ def check_db() -> dict:
 
 @app.get("/")
 def root():
-    return {"service": settings.SERVICE_NAME, "health": "/health", "docs": "/docs"}
+    return {"service": settings.SERVICE_NAME, "live": "/live", "health": "/health", "docs": "/docs"}
+
+@app.get("/live")
+def live() -> dict:
+    return {"service": settings.SERVICE_NAME, "status": "ok", "checked_at": datetime.now(timezone.utc).isoformat()}
 
 @app.get("/health")
 def health() -> JSONResponse:
