@@ -32,9 +32,10 @@ Antes del `plan`, ajustar en `main.tfvars`:
 
 ## Codigo fuente de aplicaciones
 
-- `../src/spoke1/webapp/main.py`: UI de intranet; consulta `/health` de la API.
-- `../src/spoke1/admin/main.py`: UI admin; valida API y MySQL admin.
-- `../src/spoke1/api/main.py`: API FastAPI; valida MySQL app, MySQL admin y Blob Storage.
+- `../src/spoke1/catalog/webapp/main.py`: UI de intranet (catalogo); consulta `/health` de la API de catalogo.
+- `../src/spoke1/admin/webapp/main.py`: UI admin; valida la API admin y MySQL admin.
+- `../src/spoke1/catalog/api/main.py`: API FastAPI del catalogo; valida MySQL app y Blob Storage.
+- `../src/spoke1/admin/api/main.py`: API FastAPI admin; valida MySQL admin y Blob Storage.
 - `../src/spoke3/etl-runner/main.py`: health endpoint del ETL privado.
 - `../src/spoke3/dashboard/main.py`: dashboard Streamlit para visualizar estado de analitica.
 

@@ -6,4 +6,4 @@ Este spoke no contiene una aplicacion Python propia en la primera iteracion. Su 
 - MySQL Admin DB.
 - Storage Account privado con contenedor Blob.
 
-La conectividad se valida desde `src/spoke1/api/main.py`, `src/spoke1/admin/main.py` y `src/spoke3/etl-runner/main.py` usando variables de entorno configurables.
+La conectividad se valida desde `src/spoke1/catalog/api/main.py`, `src/spoke1/admin/api/main.py` y `src/spoke3/etl-runner/main.py` usando variables de entorno configurables.
