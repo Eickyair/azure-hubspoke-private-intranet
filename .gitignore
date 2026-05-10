@@ -20,3 +20,9 @@ terraform/tfplan-*
 terraform/*.tfplan
 terraform/diagnostics.ps1
 terraform/diagnostics-output.txt
+
+# Workspace
+azure-hubspoke-private-intranet.code-workspace
+
+# Agents
+.agents

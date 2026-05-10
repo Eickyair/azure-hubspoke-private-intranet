@@ -1,5 +1,5 @@
 -- ==========================================
--- Spoke 2: Esquema Catalogo de Productos
+-- Spoke 2: Esquema Catalogo de Productos / Intranet Operativa
 -- Target: Azure Database for MySQL Flexible Server
 -- Ejecutar contra la base Terraform spoke2.app_database_name.
 -- ==========================================
@@ -12,12 +12,17 @@ CREATE TABLE IF NOT EXISTS products (
     category VARCHAR(50) NOT NULL,
     price DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
     stock INT NOT NULL DEFAULT 0,
+    warehouse_location VARCHAR(50) DEFAULT NULL,
+    supplier_id VARCHAR(50) DEFAULT NULL,
     image_blob VARCHAR(255) DEFAULT NULL,
+    document_blob_name VARCHAR(255) DEFAULT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_audited TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     INDEX idx_category (category),
+    INDEX idx_warehouse (warehouse_location),
     INDEX idx_is_active (is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -35,15 +40,3 @@ CREATE TABLE IF NOT EXISTS sales_history (
     INDEX idx_sale_date (sale_date),
     INDEX idx_region (customer_region)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-SET @schema_name = DATABASE();
-
-SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'products' AND column_name = 'created_at') = 0,
-    'ALTER TABLE products ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER is_active',
-    'SELECT 1');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
-SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'products' AND column_name = 'updated_at') = 0,
-    'ALTER TABLE products ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at',
-    'SELECT 1');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

@@ -1,5 +1,5 @@
--- Script de carga de 50 empleados realistas para la intranet (Mexico)
--- Ejecutar contra la base Terraform spoke2.admin_database_name.
+-- Script de carga de 50 empleados realistas para la intranet (México)
+USE intranet_db;
 
 INSERT INTO employees (first_name, last_name, position, department, manager_id, hire_date, salary, location, phone_number, email, is_active) VALUES
 ('Ricardo', 'Mendoza', 'Director General', 'Dirección', NULL, '2015-01-10', 150000.00, 'Ciudad de México', '55-1234-5678', 'rmendoza@northwind.lab', TRUE),
@@ -51,15 +51,4 @@ INSERT INTO employees (first_name, last_name, position, department, manager_id, 
 ('Daniela', 'Ramírez Sánchez', 'Analista de Finanzas', 'Finanzas', 34, '2022-03-31', 17617.42, 'Ciudad de México', '33-6315-6183', 'dramírez4690@northwind.lab', TRUE),
 ('Leticia', 'López González', 'Director de Comercial', 'Comercial', 1, '2023-04-19', 116445.08, 'Querétaro', '55-2555-2112', 'llópez4795@northwind.lab', TRUE),
 ('Miguel', 'Ramírez García', 'Coordinador de Recursos Humanos', 'Recursos Humanos', 1, '2021-02-15', 25008.42, 'Tijuana', '33-1560-8660', 'mramírez4860@northwind.lab', TRUE),
-('Carlos', 'Gómez Sánchez', 'Coordinador de Finanzas', 'Finanzas', 16, '2023-04-10', 27458.45, 'Guadalajara', '81-8083-5760', 'cgómez4912@northwind.lab', TRUE)
-ON DUPLICATE KEY UPDATE
-	first_name = VALUES(first_name),
-	last_name = VALUES(last_name),
-	position = VALUES(position),
-	department = VALUES(department),
-	manager_id = VALUES(manager_id),
-	hire_date = VALUES(hire_date),
-	salary = VALUES(salary),
-	location = VALUES(location),
-	phone_number = VALUES(phone_number),
-	is_active = VALUES(is_active);
+('Carlos', 'Gómez Sánchez', 'Coordinador de Finanzas', 'Finanzas', 16, '2023-04-10', 27458.45, 'Guadalajara', '81-8083-5760', 'cgómez4912@northwind.lab', TRUE);
