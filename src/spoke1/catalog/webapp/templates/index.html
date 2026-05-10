@@ -4,14 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Northwind - Portal Intranet</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=3">
     <script>
         const API_URL = "{{ api_url }}";
 
         async function fetchResources(category = null) {
             const grid = document.getElementById('tableBody');
-            grid.innerHTML = '<tr><td colspan="6" class="loader">Cargando información operativa...</td></tr>';
+            const tableTitle = document.getElementById('tableTitle');
+            grid.innerHTML = '<tr><td colspan="6"><div class="loader">Cargando información operativa...</div></td></tr>';
             
+            if (category === 'all') tableTitle.innerText = "Inventario Operativo (Todos)";
+            else if (category) tableTitle.innerText = `Inventario Operativo: ${category}`;
+            
+            // Update active state in sidebar
+            document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
+            if(category === 'all') document.getElementById('nav-all').classList.add('active');
+
             try {
                 let url = `${API_URL}/products`;
                 if (category && category !== 'all') {
@@ -24,22 +32,31 @@
                 grid.innerHTML = '';
                 
                 if (resources.length === 0) {
-                    grid.innerHTML = '<tr><td colspan="6" class="loader">No hay recursos disponibles en esta área.</td></tr>';
+                    grid.innerHTML = '<tr><td colspan="6"><div class="loader">No hay recursos disponibles en esta área.</div></td></tr>';
                     return;
                 }
                 
                 resources.forEach(r => {
                     const statusClass = r.is_active ? 'status-active' : 'status-inactive';
                     const statusText = r.is_active ? 'Activo' : 'Inactivo';
-                    const stockClass = r.stock < 50 ? 'style="color: #dc3545; font-weight: bold;"' : '';
-                    const documentLink = r.document_blob_name ? `<a href="#" class="doc-link" onclick="alert('Descargando ${r.document_blob_name}')">📄 ${r.document_blob_name}</a>` : '<span style="color: #999;">N/A</span>';
+                    const stockClass = r.stock < 50 ? 'stock-low' : '';
+                    
+                    const documentLink = r.document_blob_name ? 
+                        `<a href="#" class="doc-link" onclick="alert('Descargando ${r.document_blob_name}')">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
+                            ${r.document_blob_name}
+                        </a>` : 
+                        '<span style="color: var(--text-secondary);">N/A</span>';
                     
                     const row = document.createElement('tr');
                     
                     row.innerHTML = `
-                        <td><strong>${r.sku}</strong></td>
-                        <td>${r.name}<br><small style="color: #666;">${r.category}</small></td>
-                        <td ${stockClass}>${r.stock} Unidades</td>
+                        <td><span class="sku-text">${r.sku}</span></td>
+                        <td>
+                            <div style="font-weight: 500; color: #fff; margin-bottom: 4px;">${r.name}</div>
+                            <div style="font-size: 0.85rem; color: var(--text-secondary);">${r.category}</div>
+                        </td>
+                        <td class="${stockClass}">${r.stock} Unidades</td>
                         <td>${r.warehouse_location || 'Bodega General'}</td>
                         <td>${documentLink}</td>
                         <td><span class="status-badge ${statusClass}">${statusText}</span></td>
@@ -48,59 +65,92 @@
                 });
             } catch (error) {
                 console.error("Error fetching resources:", error);
-                grid.innerHTML = '<tr><td colspan="6" class="loader">Ocurrió un error al cargar los datos operativos.</td></tr>';
+                grid.innerHTML = '<tr><td colspan="6"><div class="loader">Ocurrió un error al cargar los datos operativos.</div></td></tr>';
             }
         }
 
-        window.onload = () => fetchResources();
+        window.onload = () => fetchResources('all');
     </script>
 </head>
 <body>
 
-    <nav class="navbar">
-        <div class="nav-brand">Northwind<span>Intranet</span></div>
-        <div class="search-bar">
-            <input type="text" placeholder="Buscar empleados, documentos o recursos operativos...">
-            <button class="search-btn">🔍</button>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">N</div>
+            Northwind
         </div>
-        <div style="font-size: 0.95rem; font-weight: 500;">
-            👤 <span id="user-name">Usuario Interno</span>
+        
+        <div class="nav-links">
+            <a href="#" id="nav-all" class="nav-link active" onclick="fetchResources('all')">
+                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                Inventario
+            </a>
+            <a href="http://localhost:8001" class="nav-link" target="_blank">
+                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                Recursos Humanos
+            </a>
         </div>
-    </nav>
-    
-    <div class="subnav">
-        <a href="#" class="active" onclick="fetchResources('all')">Dashboard General</a>
-        <a href="#" onclick="fetchResources('Abarrotes')">Operaciones Abarrotes</a>
-        <a href="#" onclick="fetchResources('Limpieza')">Operaciones Limpieza</a>
-        <a href="#" onclick="alert('Módulo de Recursos Humanos en desarrollo.')">Recursos Humanos</a>
-        <a href="#" onclick="alert('Módulo de Finanzas en desarrollo.')">Finanzas y Reportes</a>
-        <a href="#" onclick="alert('Módulo de Políticas de Empresa en desarrollo.')">Políticas y Procedimientos</a>
-    </div>
+        
+        <div class="user-profile">
+            <div class="avatar">UI</div>
+            <div>
+                <div style="font-size: 0.9rem; font-weight: 500; color: #fff;">Usuario Interno</div>
+                <div style="font-size: 0.75rem; color: var(--text-secondary);">Administrador</div>
+            </div>
+        </div>
+    </aside>
 
-    <div class="container">
-        <div class="banner">
-            <h1>Portal de Información Operativa</h1>
-            <p>Acceda a los inventarios, documentos de cumplimiento, manuales técnicos y datos corporativos de Northwind Distribución.</p>
-        </div>
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="topbar">
+            <div class="page-title">Portal de Información Operativa</div>
+            <div class="search-box">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                <input type="text" placeholder="Buscar SKU, documento, empleado...">
+            </div>
+        </header>
 
-        <div class="data-table-container">
-            <table>
-                <thead>
-                    <tr>
-                        <th>SKU / Código</th>
-                        <th>Descripción del Recurso</th>
-                        <th>Existencias</th>
-                        <th>Ubicación Física</th>
-                        <th>Documentación</th>
-                        <th>Estado</th>
-                    </tr>
-                </thead>
-                <tbody id="tableBody">
-                    <!-- Rows injected by JS -->
-                </tbody>
-            </table>
+        <div class="content-area">
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-title">Total de Activos</span>
+                    <span class="stat-value">1,248</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-title">Documentos Normativos</span>
+                    <span class="stat-value">84</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-title">Alertas de Stock</span>
+                    <span class="stat-value" style="color: var(--danger);">12</span>
+                </div>
+            </div>
+
+            <div class="data-table-container">
+                <div class="table-header">
+                    <div class="table-title" id="tableTitle">Recursos Operativos</div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Descripción</th>
+                            <th>Existencias</th>
+                            <th>Ubicación</th>
+                            <th>Documentación</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <!-- Rows injected by JS -->
+                    </tbody>
+                </table>
+            </div>
+
         </div>
-    </div>
+    </main>
 
 </body>
 </html>
