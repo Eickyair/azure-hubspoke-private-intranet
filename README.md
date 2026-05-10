@@ -116,8 +116,8 @@ Resultado esperado de verificacion:
 
 ```text
 employees       50
-products        5
-sales_history   3
+products        10
+sales_history   0
 ```
 
 ### 8. Cargar Imagenes al Storage Account Post-Deploy
@@ -133,9 +133,9 @@ Resultado esperado:
 
 ```text
 uploaded_total          10
-products_updated        5
+products_updated        10
 verified_blobs          10
-products_with_images    5
+products_with_storage_urls      10
 ```
 
 ### 9. Probar URLs Internas

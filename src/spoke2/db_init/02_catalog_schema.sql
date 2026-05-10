@@ -40,3 +40,40 @@ CREATE TABLE IF NOT EXISTS sales_history (
     INDEX idx_sale_date (sale_date),
     INDEX idx_region (customer_region)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET @schema_name = DATABASE();
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'products' AND column_name = 'warehouse_location') = 0,
+    'ALTER TABLE products ADD COLUMN warehouse_location VARCHAR(50) DEFAULT NULL AFTER stock',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'products' AND column_name = 'supplier_id') = 0,
+    'ALTER TABLE products ADD COLUMN supplier_id VARCHAR(50) DEFAULT NULL AFTER warehouse_location',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'products' AND column_name = 'document_blob_name') = 0,
+    'ALTER TABLE products ADD COLUMN document_blob_name VARCHAR(255) DEFAULT NULL AFTER image_blob',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'products' AND column_name = 'last_audited') = 0,
+    'ALTER TABLE products ADD COLUMN last_audited TIMESTAMP NULL DEFAULT NULL AFTER is_active',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'products' AND column_name = 'created_at') = 0,
+    'ALTER TABLE products ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER last_audited',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = @schema_name AND table_name = 'products' AND column_name = 'updated_at') = 0,
+    'ALTER TABLE products ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = @schema_name AND table_name = 'products' AND index_name = 'idx_warehouse') = 0,
+    'CREATE INDEX idx_warehouse ON products(warehouse_location)',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
