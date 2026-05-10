@@ -97,7 +97,7 @@ cat >"$wrapper_script" <<EOF
 \$env:POSTDEPLOY_MYSQL_PASSWORD_B64 = '$(b64_text "$mysql_password")'
 \$env:POSTDEPLOY_ADMIN_SCHEMA_B64 = '$(b64_file "$ROOT_DIR/src/spoke2/db_init/01_intranet_schema.sql")'
 \$env:POSTDEPLOY_CATALOG_SCHEMA_B64 = '$(b64_file "$ROOT_DIR/src/spoke2/db_init/02_catalog_schema.sql")'
-\$env:POSTDEPLOY_ADMIN_SEED_B64 = '$(b64_file "$ROOT_DIR/src/spoke2/db_init/03_mock_data_employees.sql")'
+\$env:POSTDEPLOY_ADMIN_SEED_B64 = '$(b64_file "$ROOT_DIR/src/spoke2/db_init/03_data_employees_seed.sql")'
 \$env:POSTDEPLOY_CATALOG_SEED_B64 = '$(b64_file "$ROOT_DIR/src/spoke2/db_init/04_catalog_seed.sql")'
 EOF
 

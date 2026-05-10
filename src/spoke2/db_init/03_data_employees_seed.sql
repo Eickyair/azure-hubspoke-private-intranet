@@ -1,5 +1,5 @@
--- Script de carga de 50 empleados realistas para la intranet (México)
-USE intranet_db;
+-- Script de carga de 50 empleados realistas para la intranet (Mexico)
+-- Ejecutar contra la base Terraform spoke2.admin_database_name.
 
 INSERT INTO employees (first_name, last_name, position, department, manager_id, hire_date, salary, location, phone_number, email, is_active) VALUES
 ('Ricardo', 'Mendoza', 'Director General', 'Dirección', NULL, '2015-01-10', 150000.00, 'Ciudad de México', '55-1234-5678', 'rmendoza@northwind.lab', TRUE),
