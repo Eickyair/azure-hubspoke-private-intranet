@@ -2,6 +2,160 @@
 
 Private enterprise intranet platform on Azure built with a Hub-and-Spoke architecture, provisioned with Terraform and integrated with Python services, MySQL databases, private storage, analytics, and secure access through Point-to-Site VPN.
 
+## Despliegue Completo
+
+Ejecutar los comandos desde la raiz del repositorio. El flujo esperado es: preparar variables, construir paquetes de App Service, desplegar Terraform, validar, poblar MySQL y cargar imagenes en Blob Storage desde la jumpbox privada.
+
+### 1. Prerrequisitos Locales
+
+Instalar y autenticar las herramientas necesarias:
+
+```bash
+az login
+az account show --output table
+terraform version
+jq --version
+```
+
+Si tienes varias suscripciones, selecciona la correcta:
+
+```bash
+az account set --subscription "<SUBSCRIPTION_ID>"
+```
+
+### 2. Configurar Variables
+
+Copia el archivo de ejemplo y ajusta los valores reales. No subas `terraform/main.tfvars` al repositorio si contiene secretos.
+
+```bash
+cp terraform/main.tfvars.example terraform/main.tfvars
+code terraform/main.tfvars
+```
+
+Valores que debes revisar antes del despliegue:
+
+- `location`
+- `resource_group_name`
+- `project_slug`, `environment` y `unique_suffix`
+- `mysql_administrator_password`
+- `vm_admin_ssh_public_key`
+- `jumpbox_admin_password`
+- `hub.vpn_root_certificate_data`, solo si habilitas VPN P2S
+
+### 3. Construir Paquetes de Spoke 1
+
+Los App Services de Spoke 1 usan paquetes ZIP preconstruidos con dependencias Python. Generarlos antes de planear o aplicar Terraform:
+
+```bash
+chmod +x scripts/build-spoke1-prebuilts.sh
+./scripts/build-spoke1-prebuilts.sh
+```
+
+El script deja los artefactos en `terraform/.terraform-build/prebuilt/`.
+
+### 4. Inicializar y Validar Terraform
+
+```bash
+terraform -chdir=terraform init
+terraform -chdir=terraform fmt -recursive
+terraform -chdir=terraform validate
+terraform -chdir=terraform plan -var-file="main.tfvars" -input=false -out=tfplan
+```
+
+### 5. Crear la Infraestructura
+
+```bash
+terraform -chdir=terraform apply -input=false tfplan
+```
+
+Tambien puedes aplicar directamente sin plan guardado:
+
+```bash
+terraform -chdir=terraform apply -var-file="main.tfvars" -input=false -auto-approve
+```
+
+Verifica los outputs principales:
+
+```bash
+terraform -chdir=terraform output
+terraform -chdir=terraform output -json | jq '{resource_group_name, jumpbox_access, spoke2_mysql_fqdns, internal_urls}'
+```
+
+### 6. Ejecutar Diagnosticos de Infraestructura
+
+Genera y ejecuta los diagnosticos desde la jumpbox con Azure Run Command:
+
+```bash
+terraform -chdir=terraform output -json | jq '{resource_group_name, jumpbox_access}'
+az vm run-command invoke \
+    -g "$(terraform -chdir=terraform output -raw resource_group_name)" \
+    -n "$(terraform -chdir=terraform output -json | jq -r '.jumpbox_access.value.vm_name')" \
+    --command-id RunPowerShellScript \
+    --scripts @terraform/diagnostics.ps1 \
+    --output table
+```
+
+### 7. Poblar Bases de Datos Post-Deploy
+
+Las bases MySQL se crean vacias con Terraform. La carga de esquemas y datos demo se ejecuta despues del despliegue desde la jumpbox privada.
+
+```bash
+chmod +x scripts/postdeploy-db.sh
+./scripts/postdeploy-db.sh all
+./scripts/postdeploy-db.sh verify
+```
+
+Para reiniciar los datos demo y volver a cargar todo:
+
+```bash
+./scripts/postdeploy-db.sh reset-demo
+./scripts/postdeploy-db.sh verify
+```
+
+Resultado esperado de verificacion:
+
+```text
+employees       50
+products        5
+sales_history   3
+```
+
+### 8. Cargar Imagenes al Storage Account Post-Deploy
+
+Las URLs origen se leen desde `src/spoke2/list-images.txt`. El runner manda un script Python a la jumpbox, descarga las imagenes, las sube al contenedor Blob privado y actualiza `products.image_blob` en MySQL.
+
+```bash
+chmod +x scripts/postdeploy-storage-images.sh
+./scripts/postdeploy-storage-images.sh
+```
+
+Resultado esperado:
+
+```text
+uploaded_total          10
+products_updated        5
+verified_blobs          10
+products_with_images    5
+```
+
+### 9. Probar URLs Internas
+
+Consulta las URLs internas esperadas:
+
+```bash
+terraform -chdir=terraform output internal_urls
+```
+
+El acceso a las aplicaciones privadas requiere estar dentro de la red privada, por ejemplo mediante Azure Bastion/jumpbox o VPN P2S si esta habilitada.
+
+### 10. Destruir el Laboratorio
+
+Cuando termines la practica, destruye los recursos para evitar costos:
+
+```bash
+terraform -chdir=terraform destroy -var-file="main.tfvars" -input=false
+```
+
 ## Architecture
 
 The following Mermaid diagrams are embedded from the source files under `docs/arquitectura`.

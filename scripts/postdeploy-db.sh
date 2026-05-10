@@ -35,6 +35,14 @@ b64_file() {
   fi
 }
 
+b64_text() {
+  if base64 --help 2>&1 | grep -q -- '-w'; then
+    printf '%s' "$1" | base64 -w0
+  else
+    printf '%s' "$1" | base64 | tr -d '\n'
+  fi
+}
+
 require_command az
 require_command jq
 require_command terraform
@@ -76,22 +84,29 @@ fi
 echo "Running post-deploy DB task '$TASK' through jumpbox '$jumpbox_vm' in resource group '$resource_group'."
 echo "Targets: catalog=$app_host/$app_database, admin=$admin_host/$admin_database"
 
+wrapper_script="$(mktemp)"
+trap 'rm -f "$wrapper_script"' EXIT
+
+cat >"$wrapper_script" <<EOF
+\$env:POSTDEPLOY_TASK_B64 = '$(b64_text "$TASK")'
+\$env:POSTDEPLOY_APP_HOST_B64 = '$(b64_text "$app_host")'
+\$env:POSTDEPLOY_ADMIN_HOST_B64 = '$(b64_text "$admin_host")'
+\$env:POSTDEPLOY_APP_DATABASE_B64 = '$(b64_text "$app_database")'
+\$env:POSTDEPLOY_ADMIN_DATABASE_B64 = '$(b64_text "$admin_database")'
+\$env:POSTDEPLOY_MYSQL_USER_B64 = '$(b64_text "$mysql_user")'
+\$env:POSTDEPLOY_MYSQL_PASSWORD_B64 = '$(b64_text "$mysql_password")'
+\$env:POSTDEPLOY_ADMIN_SCHEMA_B64 = '$(b64_file "$ROOT_DIR/src/spoke2/db_init/01_intranet_schema.sql")'
+\$env:POSTDEPLOY_CATALOG_SCHEMA_B64 = '$(b64_file "$ROOT_DIR/src/spoke2/db_init/02_catalog_schema.sql")'
+\$env:POSTDEPLOY_ADMIN_SEED_B64 = '$(b64_file "$ROOT_DIR/src/spoke2/db_init/03_mock_data_employees.sql")'
+\$env:POSTDEPLOY_CATALOG_SEED_B64 = '$(b64_file "$ROOT_DIR/src/spoke2/db_init/04_catalog_seed.sql")'
+EOF
+
+cat "$TASK_SCRIPT" >>"$wrapper_script"
+
 az vm run-command invoke \
   --resource-group "$resource_group" \
   --name "$jumpbox_vm" \
   --command-id RunPowerShellScript \
-  --scripts "@$TASK_SCRIPT" \
-  --parameters \
-    "Task=$TASK" \
-    "AppHost=$app_host" \
-    "AdminHost=$admin_host" \
-    "AppDatabase=$app_database" \
-    "AdminDatabase=$admin_database" \
-    "MysqlUser=$mysql_user" \
-    "MysqlPassword=$mysql_password" \
-    "AdminSchemaB64=$(b64_file "$ROOT_DIR/src/spoke2/db_init/01_intranet_schema.sql")" \
-    "CatalogSchemaB64=$(b64_file "$ROOT_DIR/src/spoke2/db_init/02_catalog_schema.sql")" \
-    "AdminSeedB64=$(b64_file "$ROOT_DIR/src/spoke2/db_init/03_admin_seed.sql")" \
-    "CatalogSeedB64=$(b64_file "$ROOT_DIR/src/spoke2/db_init/04_catalog_seed.sql")" \
+  --scripts "@$wrapper_script" \
   --query 'value[].message' \
   --output tsv

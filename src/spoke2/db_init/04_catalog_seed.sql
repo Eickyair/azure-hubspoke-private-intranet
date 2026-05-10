@@ -21,3 +21,26 @@ ON DUPLICATE KEY UPDATE
     stock = VALUES(stock),
     image_blob = VALUES(image_blob),
     is_active = VALUES(is_active);
+
+INSERT INTO sales_history (
+    product_id,
+    quantity,
+    unit_price,
+    sale_date,
+    customer_region
+)
+SELECT p.id, sale.quantity, sale.unit_price, sale.sale_date, sale.customer_region
+FROM products p
+JOIN (
+    SELECT 'NW-ELEC-001' AS sku, 2 AS quantity, 299.99 AS unit_price, TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY)) AS sale_date, 'Norte' AS customer_region
+    UNION ALL SELECT 'NW-ELEC-002', 5, 89.50, TIMESTAMP(DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)), 'Centro'
+    UNION ALL SELECT 'NW-OFFI-001', 1, 149.00, CURRENT_TIMESTAMP, 'Sur'
+) sale ON sale.sku = p.sku
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM sales_history sh
+    WHERE sh.product_id = p.id
+      AND sh.quantity = sale.quantity
+      AND sh.unit_price = sale.unit_price
+      AND sh.customer_region = sale.customer_region
+);

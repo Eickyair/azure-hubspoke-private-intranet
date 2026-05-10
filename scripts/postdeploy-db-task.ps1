@@ -1,25 +1,40 @@
-param(
-    [ValidateSet('schema', 'seed', 'verify', 'all', 'reset-demo')]
-    [string]$Task = 'all',
-    [Parameter(Mandatory = $true)] [string]$AppHost,
-    [Parameter(Mandatory = $true)] [string]$AdminHost,
-    [Parameter(Mandatory = $true)] [string]$AppDatabase,
-    [Parameter(Mandatory = $true)] [string]$AdminDatabase,
-    [Parameter(Mandatory = $true)] [string]$MysqlUser,
-    [Parameter(Mandatory = $true)] [string]$MysqlPassword,
-    [Parameter(Mandatory = $true)] [string]$AdminSchemaB64,
-    [Parameter(Mandatory = $true)] [string]$CatalogSchemaB64,
-    [Parameter(Mandatory = $true)] [string]$AdminSeedB64,
-    [Parameter(Mandatory = $true)] [string]$CatalogSeedB64
-)
-
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+function Get-RequiredEnv {
+    param([string]$Name)
+    $value = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        throw "Missing required environment value: $Name"
+    }
+    return $value
+}
+
+function Get-RequiredEnvText {
+    param([string]$Name)
+    return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((Get-RequiredEnv $Name)))
+}
+
+$Task = Get-RequiredEnvText 'POSTDEPLOY_TASK_B64'
+$AppHost = Get-RequiredEnvText 'POSTDEPLOY_APP_HOST_B64'
+$AdminHost = Get-RequiredEnvText 'POSTDEPLOY_ADMIN_HOST_B64'
+$AppDatabase = Get-RequiredEnvText 'POSTDEPLOY_APP_DATABASE_B64'
+$AdminDatabase = Get-RequiredEnvText 'POSTDEPLOY_ADMIN_DATABASE_B64'
+$MysqlUser = Get-RequiredEnvText 'POSTDEPLOY_MYSQL_USER_B64'
+$MysqlPassword = Get-RequiredEnvText 'POSTDEPLOY_MYSQL_PASSWORD_B64'
+$AdminSchemaB64 = Get-RequiredEnv 'POSTDEPLOY_ADMIN_SCHEMA_B64'
+$CatalogSchemaB64 = Get-RequiredEnv 'POSTDEPLOY_CATALOG_SCHEMA_B64'
+$AdminSeedB64 = Get-RequiredEnv 'POSTDEPLOY_ADMIN_SEED_B64'
+$CatalogSeedB64 = Get-RequiredEnv 'POSTDEPLOY_CATALOG_SEED_B64'
+
+if ($Task -notin @('schema', 'seed', 'verify', 'all', 'reset-demo')) {
+    throw "Unsupported task: $Task"
+}
+
 function Get-MySqlClientPath {
-    $command = Get-Command mysql.exe -ErrorAction SilentlyContinue
+    $command = Get-Command mysql.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($command) {
-        return $command.Source
+        return [string]$command.Source
     }
 
     $candidatePaths = @(
@@ -31,30 +46,32 @@ function Get-MySqlClientPath {
     foreach ($candidate in $candidatePaths) {
         $match = Get-ChildItem -Path $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($match) {
-            return $match.FullName
+            return [string]$match.FullName
         }
     }
 
     if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
         Write-Host 'Installing Chocolatey package manager...'
         Set-ExecutionPolicy Bypass -Scope Process -Force
-        Invoke-Expression ((New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        $chocoInstallOutput = Invoke-Expression ((New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        $chocoInstallOutput | ForEach-Object { Write-Host $_ }
         $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
     }
 
     Write-Host 'Installing MariaDB client...'
-    choco install mariadb -y --no-progress | Write-Host
+    $mariadbInstallOutput = & choco install mariadb -y --no-progress
+    $mariadbInstallOutput | ForEach-Object { Write-Host $_ }
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
 
-    $command = Get-Command mysql.exe -ErrorAction SilentlyContinue
+    $command = Get-Command mysql.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($command) {
-        return $command.Source
+        return [string]$command.Source
     }
 
     foreach ($candidate in $candidatePaths) {
         $match = Get-ChildItem -Path $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($match) {
-            return $match.FullName
+            return [string]$match.FullName
         }
     }
 
@@ -90,7 +107,7 @@ function Invoke-MySqlScript {
         '--port=3306',
         "--user=$MysqlUser",
         "--password=$MysqlPassword",
-        '--ssl-mode=REQUIRED',
+        '--ssl',
         '--default-character-set=utf8mb4',
         $DatabaseName
     )
@@ -104,8 +121,10 @@ function Invoke-MySqlScript {
         -Wait `
         -PassThru
 
-    $stdout = if (Test-Path $stdoutPath) { Get-Content -Raw -Path $stdoutPath } else { '' }
-    $stderr = if (Test-Path $stderrPath) { Get-Content -Raw -Path $stderrPath } else { '' }
+    $stdoutContent = if (Test-Path $stdoutPath) { Get-Content -Raw -Path $stdoutPath } else { $null }
+    $stderrContent = if (Test-Path $stderrPath) { Get-Content -Raw -Path $stderrPath } else { $null }
+    $stdout = if ($null -eq $stdoutContent) { '' } else { [string]$stdoutContent }
+    $stderr = if ($null -eq $stderrContent) { '' } else { [string]$stderrContent }
 
     if ($stdout.Trim()) {
         Write-Host $stdout.Trim()
@@ -129,8 +148,9 @@ if ($Task -in @('schema', 'all')) {
 }
 
 if ($Task -eq 'reset-demo') {
-    Invoke-MySqlScript -HostName $AdminHost -DatabaseName $AdminDatabase -Sql 'DELETE FROM employees;' -Label 'admin-reset-demo'
-    Invoke-MySqlScript -HostName $AppHost -DatabaseName $AppDatabase -Sql 'DELETE FROM products;' -Label 'catalog-reset-demo'
+    Invoke-MySqlScript -HostName $AppHost -DatabaseName $AppDatabase -Sql 'DELETE FROM sales_history;' -Label 'catalog-sales-reset-demo'
+    Invoke-MySqlScript -HostName $AdminHost -DatabaseName $AdminDatabase -Sql 'SET FOREIGN_KEY_CHECKS=0; DELETE FROM employees; ALTER TABLE employees AUTO_INCREMENT = 1; SET FOREIGN_KEY_CHECKS=1;' -Label 'admin-reset-demo'
+    Invoke-MySqlScript -HostName $AppHost -DatabaseName $AppDatabase -Sql 'DELETE FROM products; ALTER TABLE products AUTO_INCREMENT = 1; ALTER TABLE sales_history AUTO_INCREMENT = 1;' -Label 'catalog-reset-demo'
 }
 
 if ($Task -in @('seed', 'all', 'reset-demo')) {
@@ -140,7 +160,7 @@ if ($Task -in @('seed', 'all', 'reset-demo')) {
 
 if ($Task -in @('verify', 'all', 'reset-demo')) {
     Invoke-MySqlScript -HostName $AdminHost -DatabaseName $AdminDatabase -Sql "SELECT 'employees' AS table_name, COUNT(*) AS rows_count FROM employees;" -Label 'admin-verify'
-    Invoke-MySqlScript -HostName $AppHost -DatabaseName $AppDatabase -Sql "SELECT 'products' AS table_name, COUNT(*) AS rows_count FROM products;" -Label 'catalog-verify'
+    Invoke-MySqlScript -HostName $AppHost -DatabaseName $AppDatabase -Sql "SELECT 'products' AS table_name, COUNT(*) AS rows_count FROM products UNION ALL SELECT 'sales_history', COUNT(*) FROM sales_history;" -Label 'catalog-verify'
 }
 
 Write-Host "Post-deploy database task '$Task' completed."

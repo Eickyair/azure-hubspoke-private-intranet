@@ -6,7 +6,7 @@ Este directorio contiene scripts SQL idempotentes para preparar las bases privad
 
 - `01_intranet_schema.sql`: esquema de empleados para la base `spoke2.admin_database_name`.
 - `02_catalog_schema.sql`: esquema de productos para la base `spoke2.app_database_name`.
-- `03_admin_seed.sql`: datos demo de empleados.
+- `03_mock_data_employees.sql`: datos demo de 50 empleados para la base admin.
 - `04_catalog_seed.sql`: datos demo de productos.
 
 ## Ejecucion post-deploy
