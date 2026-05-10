@@ -12,6 +12,9 @@ override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+# Certificados VPN (llaves privadas y PFX)
+.vpn-certs/
+
 # Script de diagnóstico renderizado (contiene credenciales)
 diagnostics.ps1
 diagnostics-output.txt
