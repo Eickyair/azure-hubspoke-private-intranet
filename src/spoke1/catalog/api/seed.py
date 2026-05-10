@@ -15,7 +15,20 @@ def seed_data():
         ]
         db.add_all(products)
         db.commit()
-        print("Product database seeded successfully.")
+        
+        # Seed Sales History
+        from models.product import SaleHistory
+        from datetime import datetime, timedelta
+        
+        sales = [
+            SaleHistory(product_id=products[0].id, quantity=2, unit_price=299.99, sale_date=datetime.utcnow() - timedelta(days=2), customer_region="Norte"),
+            SaleHistory(product_id=products[1].id, quantity=5, unit_price=89.50, sale_date=datetime.utcnow() - timedelta(days=1), customer_region="Centro"),
+            SaleHistory(product_id=products[2].id, quantity=1, unit_price=149.00, sale_date=datetime.utcnow(), customer_region="Sur"),
+        ]
+        db.add_all(sales)
+        db.commit()
+        
+        print("Product and sales database seeded successfully.")
     else:
         print("Database already has products.")
         

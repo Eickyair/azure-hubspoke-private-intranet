@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Form, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from datetime import datetime
 
 from core.database import get_db
 from schemas.employee import Employee, EmployeeCreate
@@ -27,6 +28,11 @@ async def create_employee(
     position: str = Form(...),
     department: str = Form(...),
     email: str = Form(...),
+    hire_date: str = Form(...),
+    manager_id: Optional[int] = Form(None),
+    salary: Optional[float] = Form(None),
+    location: Optional[str] = Form(None),
+    phone_number: Optional[str] = Form(None),
     profile_picture: UploadFile = File(None),
     document: UploadFile = File(None),
     db: Session = Depends(get_db)
@@ -51,7 +57,12 @@ async def create_employee(
         "last_name": last_name,
         "position": position,
         "department": department,
-        "email": email
+        "email": email,
+        "hire_date": datetime.strptime(hire_date, "%Y-%m-%d").date(),
+        "manager_id": manager_id,
+        "salary": salary,
+        "location": location,
+        "phone_number": phone_number
     }
     db_employee = employee_service.create_employee(db=db, employee_data=employee_data, profile_blob=profile_blob, document_blob=document_blob)
     return employee_service.get_employee(db, db_employee.id)

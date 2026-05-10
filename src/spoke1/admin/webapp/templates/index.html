@@ -81,6 +81,22 @@
                     <input type="email" id="email" required>
                 </div>
                 <div class="form-group">
+                    <label>Fecha de Contratación</label>
+                    <input type="date" id="hire_date" required>
+                </div>
+                <div class="form-group">
+                    <label>Salario ($)</label>
+                    <input type="number" step="0.01" id="salary">
+                </div>
+                <div class="form-group">
+                    <label>Ubicación / Oficina</label>
+                    <input type="text" id="location">
+                </div>
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="text" id="phone_number">
+                </div>
+                <div class="form-group">
                     <label>Foto de Perfil (Opcional)</label>
                     <input type="file" id="profile_picture" accept="image/*">
                 </div>
@@ -274,7 +290,16 @@
                 </div>
                 <h2 style="margin-bottom:8px;">${emp.first_name} ${emp.last_name}</h2>
                 <div style="color: #2563eb; font-weight:600; font-size:1.1rem; margin-bottom:4px;">${emp.position}</div>
-                <div class="department">${emp.department}</div>
+                <div class="department" style="margin-bottom:12px;">${emp.department}</div>
+                
+                <div style="text-align: left; background: #f8fafc; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem;">
+                    <p style="margin-bottom: 6px;"><strong>Email:</strong> ${emp.email}</p>
+                    ${emp.phone_number ? `<p style="margin-bottom: 6px;"><strong>Teléfono:</strong> ${emp.phone_number}</p>` : ''}
+                    ${emp.location ? `<p style="margin-bottom: 6px;"><strong>Ubicación:</strong> ${emp.location}</p>` : ''}
+                    <p style="margin-bottom: 6px;"><strong>Contratación:</strong> ${emp.hire_date}</p>
+                    ${emp.salary ? `<p style="margin-bottom: 6px;"><strong>Salario:</strong> $${emp.salary}</p>` : ''}
+                    ${emp.manager_id ? `<p style="margin-bottom: 6px;"><strong>ID Manager:</strong> ${emp.manager_id}</p>` : ''}
+                </div>
                 
                 <div style="margin-top: 16px;">
                     <button class="btn btn-secondary" onclick="toggleStatus(${emp.id})">${emp.is_active ? 'Desactivar Empleado' : 'Reactivar Empleado'}</button>
@@ -295,6 +320,16 @@
             formData.append('position', document.getElementById('position').value);
             formData.append('department', document.getElementById('department').value);
             formData.append('email', document.getElementById('email').value);
+            formData.append('hire_date', document.getElementById('hire_date').value);
+            
+            const salary = document.getElementById('salary').value;
+            if(salary) formData.append('salary', salary);
+            
+            const location = document.getElementById('location').value;
+            if(location) formData.append('location', location);
+            
+            const phoneNumber = document.getElementById('phone_number').value;
+            if(phoneNumber) formData.append('phone_number', phoneNumber);
             
             const profilePic = document.getElementById('profile_picture').files[0];
             if(profilePic) formData.append('profile_picture', profilePic);
