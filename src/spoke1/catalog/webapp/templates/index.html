@@ -11,14 +11,20 @@
         async function fetchResources(category = null) {
             const grid = document.getElementById('tableBody');
             const tableTitle = document.getElementById('tableTitle');
+            const actionButtons = document.getElementById('actionButtons');
             grid.innerHTML = '<tr><td colspan="6"><div class="loader">Cargando información operativa...</div></td></tr>';
             
-            if (category === 'all') tableTitle.innerText = "Inventario Operativo (Todos)";
-            else if (category) tableTitle.innerText = `Inventario Operativo: ${category}`;
+            if (category === 'all') {
+                tableTitle.innerText = "Inventario Operativo (Todos)";
+                if (actionButtons) actionButtons.style.display = 'block';
+            } else if (category) {
+                tableTitle.innerText = `Inventario Operativo: ${category}`;
+                if (actionButtons) actionButtons.style.display = 'none';
+            }
             
             // Update active state in sidebar
             document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
-            if(category === 'all') document.getElementById('nav-all').classList.add('active');
+            document.getElementById('nav-all').classList.add('active');
 
             try {
                 let url = `${API_URL}/products`;
@@ -33,20 +39,29 @@
                 
                 if (resources.length === 0) {
                     grid.innerHTML = '<tr><td colspan="6"><div class="loader">No hay recursos disponibles en esta área.</div></td></tr>';
+                    document.getElementById('stat-total').innerText = '0';
+                    document.getElementById('stat-no-image').innerText = '0';
+                    document.getElementById('stat-alerts').innerText = '0';
                     return;
                 }
                 
+                let missingImages = 0;
+                let stockAlerts = 0;
+
                 resources.forEach(r => {
+                    if (!r.image_blob) missingImages++;
+                    if (r.stock < 50) stockAlerts++;
+
                     const statusClass = r.is_active ? 'status-active' : 'status-inactive';
                     const statusText = r.is_active ? 'Activo' : 'Inactivo';
                     const stockClass = r.stock < 50 ? 'stock-low' : '';
                     
-                    const documentLink = r.document_blob_name ? 
-                        `<a href="#" class="doc-link" onclick="alert('Descargando ${r.document_blob_name}')">
-                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
-                            ${r.document_blob_name}
+                    const imageLink = r.image_blob ? 
+                        `<a href="${API_URL}/storage/${r.image_blob}" class="doc-link" target="_blank">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            Ver Imagen
                         </a>` : 
-                        '<span style="color: var(--text-secondary);">N/A</span>';
+                        '<span style="color: var(--text-secondary);">Sin imagen</span>';
                     
                     const row = document.createElement('tr');
                     
@@ -58,14 +73,114 @@
                         </td>
                         <td class="${stockClass}">${r.stock} Unidades</td>
                         <td>${r.warehouse_location || 'Bodega General'}</td>
-                        <td>${documentLink}</td>
-                        <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                        <td>${imageLink}</td>
+                        <td>
+                            <span class="status-badge ${statusClass}" style="margin-bottom: 5px; display: inline-block;">${statusText}</span><br>
+                            <button onclick='openEditProductModal(${JSON.stringify(r)})' style="background: rgba(255,255,255,0.1); color: #fff; border: 1px solid var(--glass-border); padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: background 0.2s;">Editar</button>
+                        </td>
                     `;
                     grid.appendChild(row);
                 });
+
+                // Update stats
+                document.getElementById('stat-total').innerText = resources.length;
+                document.getElementById('stat-no-image').innerText = missingImages;
+                document.getElementById('stat-alerts').innerText = stockAlerts;
             } catch (error) {
                 console.error("Error fetching resources:", error);
                 grid.innerHTML = '<tr><td colspan="6"><div class="loader">Ocurrió un error al cargar los datos operativos.</div></td></tr>';
+            }
+        }
+
+        let isEditMode = false;
+        let currentEditProductId = null;
+
+        function openAddProductModal() {
+            isEditMode = false;
+            currentEditProductId = null;
+            document.getElementById('modalTitle').innerText = 'Registrar Nuevo Recurso';
+            document.getElementById('submitBtn').innerText = 'Guardar Recurso';
+            document.getElementById('addProductForm').reset();
+            
+            // Re-enable required fields if they were disabled
+            document.getElementById('prod_sku').required = true;
+            document.getElementById('prod_name').required = true;
+            document.getElementById('prod_category').required = true;
+            document.getElementById('prod_price').required = true;
+            document.getElementById('prod_stock').required = true;
+
+            document.getElementById('addProductModal').style.display = 'flex';
+        }
+
+        function openEditProductModal(product) {
+            isEditMode = true;
+            currentEditProductId = product.id;
+            document.getElementById('modalTitle').innerText = 'Editar Recurso';
+            document.getElementById('submitBtn').innerText = 'Actualizar Recurso';
+            
+            document.getElementById('prod_sku').value = product.sku || '';
+            document.getElementById('prod_name').value = product.name || '';
+            document.getElementById('prod_category').value = product.category || '';
+            document.getElementById('prod_price').value = product.price || '';
+            document.getElementById('prod_stock').value = product.stock || '';
+            document.getElementById('prod_desc').value = product.description || '';
+            document.getElementById('prod_image').value = ''; // file inputs cannot be preset
+            
+            // For editing, some fields might not be required if we only want to update parts
+            // But we'll leave them required to ensure data completeness
+            
+            document.getElementById('addProductModal').style.display = 'flex';
+        }
+
+        function closeAddProductModal() {
+            document.getElementById('addProductModal').style.display = 'none';
+            document.getElementById('addProductForm').reset();
+        }
+
+        async function submitProduct(e) {
+            e.preventDefault();
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.innerText = 'Guardando...';
+            btn.disabled = true;
+
+            const formData = new FormData();
+            formData.append('sku', document.getElementById('prod_sku').value);
+            formData.append('name', document.getElementById('prod_name').value);
+            formData.append('category', document.getElementById('prod_category').value);
+            formData.append('price', document.getElementById('prod_price').value);
+            formData.append('stock', document.getElementById('prod_stock').value);
+            formData.append('description', document.getElementById('prod_desc').value);
+            
+            const image = document.getElementById('prod_image').files[0];
+            if(image) formData.append('image', image);
+
+            try {
+                let url = `${API_URL}/products`;
+                let method = 'POST';
+
+                if (isEditMode && currentEditProductId) {
+                    url = `${API_URL}/products/${currentEditProductId}`;
+                    method = 'PUT';
+                    
+                    // The FastAPI expects only fields that we want to update, but we are sending all form data.
+                    // This is fine since it handles them as optional in the PUT endpoint.
+                }
+
+                const response = await fetch(url, {
+                    method: method,
+                    body: formData
+                });
+                
+                if(!response.ok) throw new Error("Error al guardar producto");
+                
+                closeAddProductModal();
+                fetchResources('all');
+            } catch (error) {
+                alert("Hubo un error al guardar el producto.");
+                console.error(error);
+            } finally {
+                btn.innerText = 'Guardar Recurso';
+                btn.disabled = false;
             }
         }
 
@@ -86,7 +201,7 @@
                 <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
                 Inventario
             </a>
-            <a href="http://localhost:8001" class="nav-link" target="_blank">
+            <a href="http://intranet.northwind.lab" class="nav-link" target="_blank">
                 <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
                 Recursos Humanos
             </a>
@@ -116,21 +231,24 @@
             <div class="stats-grid">
                 <div class="stat-card">
                     <span class="stat-title">Total de Activos</span>
-                    <span class="stat-value">1,248</span>
+                    <span class="stat-value" id="stat-total">-</span>
                 </div>
                 <div class="stat-card">
-                    <span class="stat-title">Documentos Normativos</span>
-                    <span class="stat-value">84</span>
+                    <span class="stat-title">Imágenes por cargar</span>
+                    <span class="stat-value" id="stat-no-image">-</span>
                 </div>
                 <div class="stat-card">
                     <span class="stat-title">Alertas de Stock</span>
-                    <span class="stat-value" style="color: var(--danger);">12</span>
+                    <span class="stat-value" id="stat-alerts" style="color: var(--danger);">-</span>
                 </div>
             </div>
 
             <div class="data-table-container">
                 <div class="table-header">
                     <div class="table-title" id="tableTitle">Recursos Operativos</div>
+                    <div id="actionButtons" style="display: block;">
+                        <button class="btn-primary" onclick="openAddProductModal()" style="background: var(--accent); color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 500; cursor: pointer; transition: background 0.2s;">+ Nuevo Recurso</button>
+                    </div>
                 </div>
                 <table>
                     <thead>
@@ -139,8 +257,8 @@
                             <th>Descripción</th>
                             <th>Existencias</th>
                             <th>Ubicación</th>
-                            <th>Documentación</th>
-                            <th>Estado</th>
+                            <th>Imagen</th>
+                            <th>Estado y Acciones</th>
                         </tr>
                     </thead>
                     <tbody id="tableBody">
@@ -151,6 +269,52 @@
 
         </div>
     </main>
+
+    <!-- Modal Agregar Producto -->
+    <div id="addProductModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); z-index: 100; align-items: center; justify-content: center;">
+        <div style="background: var(--bg-color); border: 1px solid var(--glass-border); border-radius: 16px; width: 500px; max-width: 90%; padding: 30px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--glass-border);">
+                <h2 id="modalTitle" style="color: #fff; font-size: 1.2rem;">Registrar Nuevo Recurso</h2>
+                <button onclick="closeAddProductModal()" style="background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer;">&times;</button>
+            </div>
+            <form id="addProductForm" onsubmit="submitProduct(event)">
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 0.9rem;">SKU / Código</label>
+                    <input type="text" id="prod_sku" required style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--glass-border); color: #fff; padding: 10px; border-radius: 8px; font-family: inherit; box-sizing: border-box;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 0.9rem;">Nombre / Descripción Corta</label>
+                    <input type="text" id="prod_name" required style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--glass-border); color: #fff; padding: 10px; border-radius: 8px; font-family: inherit; box-sizing: border-box;">
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 0.9rem;">Categoría Operativa</label>
+                    <input type="text" id="prod_category" required placeholder="Ej: Abarrotes, Limpieza, Mantenimiento..." style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--glass-border); color: #fff; padding: 10px; border-radius: 8px; font-family: inherit; box-sizing: border-box;">
+                </div>
+                <div style="display: flex; gap: 15px; margin-bottom: 15px;">
+                    <div style="flex: 1;">
+                        <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 0.9rem;">Valor Unitario ($)</label>
+                        <input type="number" step="0.01" id="prod_price" required style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--glass-border); color: #fff; padding: 10px; border-radius: 8px; font-family: inherit; box-sizing: border-box;">
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 0.9rem;">Stock / Existencias</label>
+                        <input type="number" id="prod_stock" required style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--glass-border); color: #fff; padding: 10px; border-radius: 8px; font-family: inherit; box-sizing: border-box;">
+                    </div>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 0.9rem;">Notas Técnicas</label>
+                    <textarea id="prod_desc" rows="3" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--glass-border); color: #fff; padding: 10px; border-radius: 8px; font-family: inherit; resize: vertical; box-sizing: border-box;"></textarea>
+                </div>
+                <div style="margin-bottom: 25px;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: 0.9rem;">Documento/Foto (Opcional)</label>
+                    <input type="file" id="prod_image" accept="image/*,.pdf" style="color: var(--text-secondary); font-size: 0.85rem;">
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid var(--glass-border); padding-top: 15px;">
+                    <button type="button" onclick="closeAddProductModal()" style="background: rgba(255,255,255,0.05); color: #fff; border: 1px solid var(--glass-border); padding: 8px 16px; border-radius: 8px; font-weight: 500; cursor: pointer; transition: background 0.2s;">Cancelar</button>
+                    <button type="submit" id="submitBtn" style="background: var(--accent); color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 500; cursor: pointer; transition: background 0.2s;">Guardar Recurso</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
 </body>
 </html>
