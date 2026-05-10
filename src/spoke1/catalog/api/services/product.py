@@ -25,3 +25,13 @@ def update_product_image(db: Session, product_id: int, image_blob: str):
         db.commit()
         db.refresh(db_product)
     return db_product
+
+def update_product(db: Session, product_id: int, product_data: dict):
+    db_product = get_product(db, product_id)
+    if db_product:
+        for key, value in product_data.items():
+            if hasattr(db_product, key) and value is not None:
+                setattr(db_product, key, value)
+        db.commit()
+        db.refresh(db_product)
+    return db_product

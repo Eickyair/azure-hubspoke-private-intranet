@@ -51,6 +51,43 @@ async def create_product(
         
     return db_product
 
+@router.put("/products/{product_id}", response_model=Product)
+async def update_product(
+    product_id: int,
+    sku: str = Form(None),
+    name: str = Form(None),
+    description: str = Form(None),
+    category: str = Form(None),
+    price: float = Form(None),
+    stock: int = Form(None),
+    is_active: bool = Form(None),
+    image: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    db_product = product_service.get_product(db, product_id)
+    if not db_product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    update_data = {}
+    if sku is not None: update_data["sku"] = sku
+    if name is not None: update_data["name"] = name
+    if description is not None: update_data["description"] = description
+    if category is not None: update_data["category"] = category
+    if price is not None: update_data["price"] = price
+    if stock is not None: update_data["stock"] = stock
+    if is_active is not None: update_data["is_active"] = is_active
+
+    db_product = product_service.update_product(db, product_id, update_data)
+
+    if image:
+        content = await image.read()
+        extension = image.filename.split(".")[-1] if "." in image.filename else "jpg"
+        blob_name = f"product_{db_product.id}_{db_product.sku}.{extension}"
+        storage_service.upload_file(content, blob_name, image.content_type)
+        db_product = product_service.update_product_image(db, db_product.id, blob_name)
+
+    return db_product
+
 @router.get("/storage/{blob_name}")
 def download_blob(blob_name: str):
     try:
