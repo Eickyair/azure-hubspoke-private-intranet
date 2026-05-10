@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Northwind - Catálogo de Productos</title>
+    <title>Northwind - Portal Intranet</title>
     <link rel="stylesheet" href="/static/style.css">
     <script>
         const API_URL = "{{ api_url }}";
 
-        async function fetchProducts(category = null) {
-            const grid = document.getElementById('productGrid');
-            grid.innerHTML = '<div class="loader">Cargando productos...</div>';
+        async function fetchResources(category = null) {
+            const grid = document.getElementById('tableBody');
+            grid.innerHTML = '<tr><td colspan="6" class="loader">Cargando información operativa...</td></tr>';
             
             try {
                 let url = `${API_URL}/products`;
@@ -19,85 +19,86 @@
                 }
                 
                 const response = await fetch(url);
-                const products = await response.json();
+                const resources = await response.json();
                 
                 grid.innerHTML = '';
                 
-                if (products.length === 0) {
-                    grid.innerHTML = '<div class="loader">No hay productos disponibles en esta categoría.</div>';
+                if (resources.length === 0) {
+                    grid.innerHTML = '<tr><td colspan="6" class="loader">No hay recursos disponibles en esta área.</td></tr>';
                     return;
                 }
                 
-                products.forEach(p => {
-                    if (!p.is_active) return; // Hide inactive products from clients
+                resources.forEach(r => {
+                    const statusClass = r.is_active ? 'status-active' : 'status-inactive';
+                    const statusText = r.is_active ? 'Activo' : 'Inactivo';
+                    const stockClass = r.stock < 50 ? 'style="color: #dc3545; font-weight: bold;"' : '';
+                    const documentLink = r.document_blob_name ? `<a href="#" class="doc-link" onclick="alert('Descargando ${r.document_blob_name}')">📄 ${r.document_blob_name}</a>` : '<span style="color: #999;">N/A</span>';
                     
-                    const card = document.createElement('div');
-                    card.className = 'product-card';
+                    const row = document.createElement('tr');
                     
-                    let imageHtml = '<div class="product-img-placeholder">🛒</div>';
-                    if (p.image_blob) {
-                        imageHtml = `<img src="${API_URL}/storage/${p.image_blob}" alt="${p.name}">`;
-                    }
-                    
-                    const stockClass = p.stock < 10 ? 'low' : '';
-                    const stockText = p.stock > 0 ? (p.stock < 10 ? `¡Solo ${p.stock} en stock - haz tu pedido pronto!` : 'Disponible') : 'Agotado';
-                    
-                    card.innerHTML = `
-                        <div class="product-img-container">
-                            ${imageHtml}
-                        </div>
-                        <div class="product-title" onclick="alert('Funcionalidad de detalle en desarrollo.')">${p.name}</div>
-                        <div class="product-price"><span class="currency">$</span>${p.price.toFixed(2)}</div>
-                        <div class="product-stock ${stockClass}">${stockText}</div>
-                        <button class="btn-add" onclick="alert('Funcionalidad de carrito deshabilitada por ahora.')">Agregar al carrito</button>
+                    row.innerHTML = `
+                        <td><strong>${r.sku}</strong></td>
+                        <td>${r.name}<br><small style="color: #666;">${r.category}</small></td>
+                        <td ${stockClass}>${r.stock} Unidades</td>
+                        <td>${r.warehouse_location || 'Bodega General'}</td>
+                        <td>${documentLink}</td>
+                        <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                     `;
-                    grid.appendChild(card);
+                    grid.appendChild(row);
                 });
             } catch (error) {
-                console.error("Error fetching products:", error);
-                grid.innerHTML = '<div class="loader">Ocurrió un error al cargar el catálogo. Por favor intente más tarde.</div>';
+                console.error("Error fetching resources:", error);
+                grid.innerHTML = '<tr><td colspan="6" class="loader">Ocurrió un error al cargar los datos operativos.</td></tr>';
             }
         }
 
-        window.onload = () => fetchProducts();
+        window.onload = () => fetchResources();
     </script>
 </head>
 <body>
 
     <nav class="navbar">
-        <div class="nav-brand">northwind<span>.com</span></div>
+        <div class="nav-brand">Northwind<span>Intranet</span></div>
         <div class="search-bar">
-            <input type="text" placeholder="Buscar productos (mock)...">
+            <input type="text" placeholder="Buscar empleados, documentos o recursos operativos...">
             <button class="search-btn">🔍</button>
         </div>
-        <div style="font-size: 0.9rem; margin-right: 20px;">
-            Hola, Identifícate<br><b>Cuentas y Listas</b>
-        </div>
-        <div style="font-size: 0.9rem; margin-right: 20px;">
-            Devoluciones<br><b>y Pedidos</b>
-        </div>
-        <div style="font-weight: bold;">
-            🛒 Carrito
+        <div style="font-size: 0.95rem; font-weight: 500;">
+            👤 <span id="user-name">Usuario Interno</span>
         </div>
     </nav>
     
     <div class="subnav">
-        <a href="#" onclick="fetchProducts('all')">Todo</a>
-        <a href="#" onclick="fetchProducts('Electrónica')">Electrónica</a>
-        <a href="#" onclick="fetchProducts('Oficina')">Oficina</a>
-        <a href="#" onclick="fetchProducts('Limpieza')">Limpieza</a>
-        <a href="#">Ofertas del Día</a>
-        <a href="#">Servicio al Cliente</a>
+        <a href="#" class="active" onclick="fetchResources('all')">Dashboard General</a>
+        <a href="#" onclick="fetchResources('Abarrotes')">Operaciones Abarrotes</a>
+        <a href="#" onclick="fetchResources('Limpieza')">Operaciones Limpieza</a>
+        <a href="#" onclick="alert('Módulo de Recursos Humanos en desarrollo.')">Recursos Humanos</a>
+        <a href="#" onclick="alert('Módulo de Finanzas en desarrollo.')">Finanzas y Reportes</a>
+        <a href="#" onclick="alert('Módulo de Políticas de Empresa en desarrollo.')">Políticas y Procedimientos</a>
     </div>
 
     <div class="container">
         <div class="banner">
-            <h1>Descubre Nuestros Productos</h1>
-            <p>La mejor selección de suministros para tu empresa a los mejores precios.</p>
+            <h1>Portal de Información Operativa</h1>
+            <p>Acceda a los inventarios, documentos de cumplimiento, manuales técnicos y datos corporativos de Northwind Distribución.</p>
         </div>
 
-        <div id="productGrid" class="product-grid">
-            <!-- Products injected by JS -->
+        <div class="data-table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>SKU / Código</th>
+                        <th>Descripción del Recurso</th>
+                        <th>Existencias</th>
+                        <th>Ubicación Física</th>
+                        <th>Documentación</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <!-- Rows injected by JS -->
+                </tbody>
+            </table>
         </div>
     </div>
 

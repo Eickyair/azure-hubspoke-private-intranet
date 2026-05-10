@@ -5,24 +5,32 @@ INSERT INTO products (
     category,
     price,
     stock,
+    warehouse_location,
+    supplier_id,
     image_blob,
-    is_active
+    document_blob_name,
+    is_active,
+    last_audited
 ) VALUES
-    ('LMD-FID-200', 'La Moderna Sopa Fideo', 'Sopa de pasta fideo sazón casero con tomate y pollo. Empaque familiar. 200g', 'Abarrotes', 12.50, 150, NULL, TRUE),
-    ('FUD-PAV-450', 'FUD Pechuga de Pavo Virginia', 'Pechuga de pavo Virginia FUD, 26 rebanadas. Empaque bioamigable resellable. 450g', 'Salchichoneria', 85.00, 60, NULL, TRUE),
-    ('DJU-70-700', 'Tequila Don Julio 70 Añejo Cristalino', 'Tequila añejo cristalino Don Julio 70, 100% de agave. 700ml', 'Vinos y Licores', 1150.00, 25, NULL, TRUE),
-    ('NUT-SOY-946', 'Nutrioli Aceite Comestible', 'Aceite comestible puro de soya Nutrioli con omegas 3, 6 y 9. 946ml', 'Abarrotes', 48.00, 200, NULL, TRUE),
-    ('KEL-ZUC-620', 'Kellogg''s Zucaritas', 'Cereal de hojuelas de maíz escarchadas con azúcar. Empaque familiar (Aprox. 20 raciones). 620g', 'Abarrotes', 75.00, 85, NULL, TRUE),
-    ('FAB-LAV-2000', 'Fabuloso Frescura Activa Lavanda', 'Limpiador multiusos antibacterial y antiviral, aroma fresca lavanda. 2L', 'Limpieza', 42.00, 120, NULL, TRUE),
-    ('LMD-LET-250', 'La Moderna Pasta Letra', 'Pasta de sémola de trigo durum en forma de letras, enriquecida con vitaminas. 250g', 'Abarrotes', 10.00, 180, NULL, TRUE),
-    ('BON-LEV-1400', 'Bonafont Levité Pepino-Limón', 'Agua infusionada sabor pepino-limón. 1.4L', 'Bebidas', 22.00, 90, NULL, TRUE),
-    ('FUD-PAN-300', 'FUD Queso Panela Rebanado', 'Queso panela rebanado 100% de leche, 10 rebanadas. Empaque bioamigable. 300g', 'Lacteos', 65.00, 40, NULL, TRUE),
-    ('ELE-UVA-625', 'Electrolit Suero Rehidratante Uva', 'Solución esterilizada de electrolitos orales sabor uva para tratar la deshidratación. 625ml', 'Farmacia', 32.00, 110, NULL, TRUE)
+    ('LMD-FID-200', 'La Moderna Sopa Fideo', 'Sopa de pasta fideo sazón casero con tomate y pollo. Empaque familiar. 200g', 'Abarrotes', 12.50, 150, 'Bodega Central - Pasillo 4', 'SUP-1020', NULL, 'tech_sheet_LMD.pdf', TRUE, '2026-05-01 10:00:00'),
+    ('FUD-PAV-450', 'FUD Pechuga de Pavo Virginia', 'Pechuga de pavo Virginia FUD, 26 rebanadas. Empaque bioamigable resellable. 450g', 'Salchichoneria', 85.00, 60, 'Cuarto Frío 1 - Sector B', 'SUP-2041', NULL, 'quality_FUD.pdf', TRUE, '2026-05-05 08:30:00'),
+    ('DJU-70-700', 'Tequila Don Julio 70 Añejo Cristalino', 'Tequila añejo cristalino Don Julio 70, 100% de agave. 700ml', 'Vinos y Licores', 1150.00, 25, 'Bodega Segura - Rack 2', 'SUP-3005', NULL, NULL, TRUE, '2026-05-09 12:00:00'),
+    ('NUT-SOY-946', 'Nutrioli Aceite Comestible', 'Aceite comestible puro de soya Nutrioli con omegas 3, 6 y 9. 946ml', 'Abarrotes', 48.00, 200, 'Bodega Central - Pasillo 8', 'SUP-1088', NULL, 'safety_NUT.pdf', TRUE, '2026-04-20 14:15:00'),
+    ('KEL-ZUC-620', 'Kellogg''s Zucaritas', 'Cereal de hojuelas de maíz escarchadas con azúcar. Empaque familiar (Aprox. 20 raciones). 620g', 'Abarrotes', 75.00, 85, 'Bodega Central - Pasillo 2', 'SUP-1011', NULL, NULL, TRUE, '2026-04-28 09:45:00'),
+    ('FAB-LAV-2000', 'Fabuloso Frescura Activa Lavanda', 'Limpiador multiusos antibacterial y antiviral, aroma fresca lavanda. 2L', 'Limpieza', 42.00, 120, 'Bodega Químicos - Zona A', 'SUP-4012', NULL, 'msds_FAB.pdf', TRUE, '2026-05-02 11:20:00'),
+    ('LMD-LET-250', 'La Moderna Pasta Letra', 'Pasta de sémola de trigo durum en forma de letras, enriquecida con vitaminas. 250g', 'Abarrotes', 10.00, 180, 'Bodega Central - Pasillo 4', 'SUP-1020', NULL, NULL, TRUE, '2026-05-01 10:15:00'),
+    ('BON-LEV-1400', 'Bonafont Levité Pepino-Limón', 'Agua infusionada sabor pepino-limón. 1.4L', 'Bebidas', 22.00, 90, 'Bodega Central - Pasillo 9', 'SUP-1090', NULL, NULL, TRUE, '2026-05-06 16:00:00'),
+    ('FUD-PAN-300', 'FUD Queso Panela Rebanado', 'Queso panela rebanado 100% de leche, 10 rebanadas. Empaque bioamigable. 300g', 'Lacteos', 65.00, 40, 'Cuarto Frío 2 - Sector A', 'SUP-2041', NULL, 'handling_FUD.pdf', TRUE, '2026-05-05 08:45:00'),
+    ('ELE-UVA-625', 'Electrolit Suero Rehidratante Uva', 'Solución esterilizada de electrolitos orales sabor uva para tratar la deshidratación. 625ml', 'Farmacia', 32.00, 110, 'Bodega Especial - Zona Médica', 'SUP-5022', NULL, 'pharma_cert_ELE.pdf', TRUE, '2026-05-08 10:00:00')
 ON DUPLICATE KEY UPDATE
     name = VALUES(name),
     description = VALUES(description),
     category = VALUES(category),
     price = VALUES(price),
     stock = VALUES(stock),
+    warehouse_location = VALUES(warehouse_location),
+    supplier_id = VALUES(supplier_id),
     image_blob = VALUES(image_blob),
+    document_blob_name = VALUES(document_blob_name),
+    last_audited = VALUES(last_audited),
     is_active = VALUES(is_active);

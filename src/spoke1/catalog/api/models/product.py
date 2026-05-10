@@ -12,8 +12,12 @@ class Product(Base):
     category = Column(String(50), index=True)
     price = Column(Numeric(10, 2), default=0.0)
     stock = Column(Integer, default=0)
+    warehouse_location = Column(String(50), nullable=True, index=True)
+    supplier_id = Column(String(50), nullable=True)
     image_blob = Column(String(255), nullable=True)
+    document_blob_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
+    last_audited = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
