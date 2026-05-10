@@ -4,7 +4,7 @@ Private enterprise intranet platform on Azure built with a Hub-and-Spoke archite
 
 ## Despliegue Completo
 
-Ejecutar los comandos desde la raiz del repositorio. El flujo esperado es: preparar variables, construir paquetes de App Service, desplegar Terraform, validar, poblar MySQL y cargar imagenes en Blob Storage desde la jumpbox privada.
+Ejecutar los comandos desde la raiz del repositorio. El flujo recomendado ahora es usar un solo script orquestador que construye los paquetes de Spoke 1, ejecuta Terraform en orden, valida la infraestructura desde la jumpbox y, solo si no hay `FAIL`, puebla MySQL y carga imagenes en Blob Storage privado.
 
 ### 1. Prerrequisitos Locales
 
@@ -42,7 +42,47 @@ Valores que debes revisar antes del despliegue:
 - `jumpbox_admin_password`
 - `hub.vpn_root_certificate_data`, solo si habilitas VPN P2S
 
-### 3. Construir Paquetes de Spoke 1
+### 3. Ejecutar el Script Unico
+
+El script `scripts/deploy-full.sh` orquesta el flujo completo en este orden:
+
+1. Build de ZIPs prebuilt para Spoke 1.
+2. `terraform init`.
+3. `terraform validate`.
+4. `terraform plan`.
+5. `terraform apply`, solo si pasas `--auto-approve`.
+6. Diagnosticos desde la jumpbox.
+7. Postdeploy de bases de datos.
+8. Carga de imagenes al Storage privado de Spoke 2.
+
+Uso recomendado:
+
+```bash
+chmod +x scripts/deploy-full.sh
+./scripts/deploy-full.sh --auto-approve --db-task reset-demo
+```
+
+Modo seguro, solo hasta `plan`:
+
+```bash
+./scripts/deploy-full.sh
+```
+
+Ejemplos utiles:
+
+```bash
+./scripts/deploy-full.sh --plan-file tfplan-lab
+./scripts/deploy-full.sh --auto-approve --skip-diagnostics
+./scripts/deploy-full.sh --auto-approve --skip-images --db-task all
+```
+
+El script se detiene antes de poblar datos si los diagnosticos reportan `FAIL`. Las advertencias conocidas no bloquean el flujo.
+
+### 4. Flujo Manual, Paso a Paso
+
+Si necesitas ejecutar fases individuales o depurar el proceso, puedes seguir usando el flujo manual.
+
+#### 4.1 Construir Paquetes de Spoke 1
 
 Los App Services de Spoke 1 usan paquetes ZIP preconstruidos con dependencias Python. Generarlos antes de planear o aplicar Terraform:
 
@@ -53,7 +93,7 @@ chmod +x scripts/build-spoke1-prebuilts.sh
 
 El script deja los artefactos en `terraform/.terraform-build/prebuilt/`.
 
-### 4. Inicializar y Validar Terraform
+#### 4.2 Inicializar y Validar Terraform
 
 ```bash
 terraform -chdir=terraform init
@@ -62,7 +102,7 @@ terraform -chdir=terraform validate
 terraform -chdir=terraform plan -var-file="main.tfvars" -input=false -out=tfplan
 ```
 
-### 5. Crear la Infraestructura
+#### 4.3 Crear la Infraestructura
 
 ```bash
 terraform -chdir=terraform apply -input=false tfplan
@@ -81,7 +121,7 @@ terraform -chdir=terraform output
 terraform -chdir=terraform output -json | jq '{resource_group_name, jumpbox_access, spoke2_mysql_fqdns, internal_urls}'
 ```
 
-### 6. Ejecutar Diagnosticos de Infraestructura
+#### 4.4 Ejecutar Diagnosticos de Infraestructura
 
 Genera y ejecuta los diagnosticos desde la jumpbox con Azure Run Command:
 
@@ -95,7 +135,7 @@ az vm run-command invoke \
     --output table
 ```
 
-### 7. Poblar Bases de Datos Post-Deploy
+#### 4.5 Poblar Bases de Datos Post-Deploy
 
 Las bases MySQL se crean vacias con Terraform. La carga de esquemas y datos demo se ejecuta despues del despliegue desde la jumpbox privada.
 
@@ -120,7 +160,7 @@ products        10
 sales_history   0
 ```
 
-### 8. Cargar Imagenes al Storage Account Post-Deploy
+#### 4.6 Cargar Imagenes al Storage Account Post-Deploy
 
 Las URLs origen se leen desde `src/spoke2/list-images.txt`. El runner manda un script Python a la jumpbox, descarga las imagenes, las sube al contenedor Blob privado y actualiza `products.image_blob` en MySQL.
 
@@ -138,7 +178,7 @@ verified_blobs          10
 products_with_storage_urls      10
 ```
 
-### 9. Probar URLs Internas
+### 5. Probar URLs Internas
 
 Consulta las URLs internas esperadas:
 
@@ -148,12 +188,19 @@ terraform -chdir=terraform output internal_urls
 
 El acceso a las aplicaciones privadas requiere estar dentro de la red privada, por ejemplo mediante Azure Bastion/jumpbox o VPN P2S si esta habilitada.
 
-### 10. Destruir el Laboratorio
+### 6. Destruir el Laboratorio
 
 Cuando termines la practica, destruye los recursos para evitar costos:
 
 ```bash
-terraform -chdir=terraform destroy -var-file="main.tfvars" -input=false
+chmod +x scripts/destroy-infra.sh
+./scripts/destroy-infra.sh --auto-approve --wait
+```
+
+El script es idempotente: si no hay recursos pendientes o el Resource Group ya esta en proceso de borrado, termina sin volver a iniciar acciones destructivas. Para revisar el plan antes de aplicar:
+
+```bash
+./scripts/destroy-infra.sh
 ```
 
 ## Architecture

@@ -1,4 +1,6 @@
 import os
+from urllib.parse import unquote, urlparse
+
 from azure.storage.blob import BlobServiceClient
 from core.config import settings
 
@@ -24,9 +26,21 @@ class StorageService:
         else:
             blob_client = self.container_client.get_blob_client(blob_name)
             blob_client.upload_blob(file_content, overwrite=True)
-            return blob_name
+            return blob_client.url
 
-    def get_file_content(self, blob_name: str) -> bytes:
+    def normalize_blob_name(self, blob_name_or_url: str) -> str:
+        parsed = urlparse(blob_name_or_url)
+        if not parsed.scheme:
+            return blob_name_or_url.lstrip("/")
+
+        path = unquote(parsed.path).lstrip("/")
+        container_prefix = f"{settings.storage_container_name}/"
+        if path.startswith(container_prefix):
+            return path[len(container_prefix):]
+        return path
+
+    def get_file_content(self, blob_name_or_url: str) -> bytes:
+        blob_name = self.normalize_blob_name(blob_name_or_url)
         if self.use_mock:
             file_path = os.path.join(self.mock_dir, blob_name)
             if os.path.exists(file_path):

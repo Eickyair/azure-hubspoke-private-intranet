@@ -88,7 +88,7 @@ variable "hub" {
     enable_test_vm                        = true
     grant_test_vm_rbac                    = false
     jumpbox_private_ip                    = "10.10.4.10"
-    jumpbox_vm_size                       = "Standard_B2ls_v2"
+    jumpbox_vm_size                       = "Standard_B4s_v2"
   }
 }
 
