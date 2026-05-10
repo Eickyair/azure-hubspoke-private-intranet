@@ -1,10 +1,8 @@
 -- ==========================================
--- Spoke 2: Base de Datos Catálogo de Productos
+-- Spoke 2: Esquema Catalogo de Productos
 -- Target: Azure Database for MySQL Flexible Server
+-- Ejecutar contra la base Terraform spoke2.app_database_name.
 -- ==========================================
-
-CREATE DATABASE IF NOT EXISTS catalog_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE catalog_db;
 
 CREATE TABLE IF NOT EXISTS products (
     id INT AUTO_INCREMENT PRIMARY KEY,

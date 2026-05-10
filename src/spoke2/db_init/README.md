@@ -1,25 +1,28 @@
-# Inicialización de Azure Database for MySQL (Flexible Server)
+# Inicializacion de Azure Database for MySQL (Flexible Server)
 
-Este directorio contiene los scripts de esquema SQL puros que deben ser ejecutados en el servidor MySQL (PaaS) en Azure (Spoke 2) antes de encender las aplicaciones del Spoke 1.
+Este directorio contiene scripts SQL idempotentes para preparar las bases privadas de Spoke 2 despues de crear la infraestructura con Terraform.
 
 ## Contenido
 
-- `01_intranet_schema.sql`: Estructura para el catálogo de empleados (App Admin).
-- `02_catalog_schema.sql`: Estructura para el catálogo de productos (App Catalog).
+- `01_intranet_schema.sql`: esquema de empleados para la base `spoke2.admin_database_name`.
+- `02_catalog_schema.sql`: esquema de productos para la base `spoke2.app_database_name`.
+- `03_admin_seed.sql`: datos demo de empleados.
+- `04_catalog_seed.sql`: datos demo de productos.
 
-## Ejecución en Azure (Desde una VM o Cloud Shell conectado a la VNet)
+## Ejecucion post-deploy
 
-Al desplegar una arquitectura Hub & Spoke sin acceso a Internet, deberás ejecutar estos scripts desde una máquina o conexión VPN que tenga enrutamiento hacia la subred de la base de datos (Ej: mediante la VPN Point-to-Site configurada en el Gateway).
+La forma recomendada en este laboratorio es ejecutar las tareas desde la jumpbox privada mediante Azure Run Command:
 
 ```bash
-# Conéctate al servidor PaaS
-mysql -h <tu-servidor-azure>.mysql.database.azure.com -u <usuario> -p
-
-# Ejecuta el script de Empleados
-mysql> source /ruta/hacia/01_intranet_schema.sql;
-
-# Ejecuta el script de Productos
-mysql> source /ruta/hacia/02_catalog_schema.sql;
+./scripts/postdeploy-db.sh schema
+./scripts/postdeploy-db.sh seed
+./scripts/postdeploy-db.sh verify
 ```
 
-Las aplicaciones en `spoke1/` insertarán automáticamente los datos de prueba (`seeds`) si las tablas están vacías gracias a la lógica implementada en SQLAlchemy.
+Tambien se puede ejecutar todo en una sola llamada:
+
+```bash
+./scripts/postdeploy-db.sh all
+```
+
+El runner local lee los outputs de Terraform, toma los FQDN privados de MySQL y ejecuta la tarea en la VM jumpbox, que si tiene ruta y DNS privado hacia las bases.
