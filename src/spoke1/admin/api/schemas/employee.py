@@ -1,11 +1,17 @@
 from pydantic import BaseModel
 from typing import Optional
+from datetime import date, datetime
 
 class EmployeeBase(BaseModel):
     first_name: str
     last_name: str
     position: str
     department: str
+    manager_id: Optional[int] = None
+    hire_date: date
+    salary: Optional[float] = None
+    location: Optional[str] = None
+    phone_number: Optional[str] = None
     email: str
     is_active: bool = True
 
