@@ -505,3 +505,15 @@ flowchart TB
 - [Spoke 2 - Data and documents](docs/arquitectura/spoke2-datos-detalle.mmd)
 - [Spoke 3 - Analytics](docs/arquitectura/spoke3-analitica-detalle.mmd)
 - [Diagram guide](docs/arquitectura/diagramas-jerarquicos.md)
+
+## Team
+
+Practica final de arquitectura cloud privada en Azure · UNAM 2026
+
+| | | |
+| :---: | :---: | :---: |
+| <img src="https://github.com/Eickyair.png" width="88" alt="Erick Aguilar"> | <img src="https://github.com/identicons/cemh.png" width="88" alt="Carlos Emiliano"> | <img src="https://github.com/alanmagno1.png" width="88" alt="Alan Magno"> |
+| **[Erick Aguilar](https://github.com/Eickyair)** | **Carlos E. Mendoza H.** | **[Alan Magno](https://github.com/alanmagno1)** |
+| Cloud Infrastructure Engineer | Full Stack Developer | Network Security |
+| Arquitectura Terraform Hub-Spoke, despliegue orquestado, diagnosticos y postdeploy | APIs FastAPI, frontend glassmorphism, schemas MySQL, integracion Blob Storage | VPN Point-to-Site, Azure VPN Gateway y autenticacion PKI |
+| `Terraform` `Azure` `IaC` `Bash` `Python` | `FastAPI` `Jinja2` `MySQL` `HTML/CSS` | `VPN P2S` `PKI` `Terraform` |
