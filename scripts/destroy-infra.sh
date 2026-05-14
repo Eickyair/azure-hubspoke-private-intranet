@@ -4,11 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TERRAFORM_DIR="$ROOT_DIR/terraform"
 TFVARS_FILE="$TERRAFORM_DIR/main.tfvars"
+BACKEND_CONFIG_FILE="${TF_BACKEND_CONFIG_FILE:-$TERRAFORM_DIR/backend.hcl}"
 PLAN_FILE="tfplan-destroy"
 AUTO_APPROVE=false
 SKIP_INIT=false
 SKIP_VALIDATE=false
 WAIT_FOR_DELETE=false
+TERRAFORM_LOCK_TIMEOUT="${TERRAFORM_LOCK_TIMEOUT:-5m}"
 
 RESOURCE_GROUP=""
 PLAN_EXIT_CODE=0
@@ -21,6 +23,7 @@ Elimina de forma idempotente la infraestructura del laboratorio con Terraform.
 
 Options:
   --tfvars <path>          Ruta al archivo tfvars. Default: terraform/main.tfvars
+  --backend-config <path>  Ruta al backend.hcl. Default: terraform/backend.hcl
   --plan-file <name>       Nombre o ruta del plan file. Default: tfplan-destroy
   --auto-approve           Aplica el destroy sin confirmacion interactiva
   --wait                   Espera hasta que Azure confirme que el Resource Group fue eliminado
@@ -30,6 +33,7 @@ Options:
 
 Examples:
   ./scripts/destroy-infra.sh
+  ./scripts/destroy-infra.sh --backend-config terraform/backend.hcl
   ./scripts/destroy-infra.sh --auto-approve --wait
   ./scripts/destroy-infra.sh --tfvars terraform/main.tfvars --plan-file tfplan-lab-destroy
 EOF
@@ -102,6 +106,12 @@ require_prerequisites() {
     exit 1
   fi
 
+  if [[ "$SKIP_INIT" == false && ! -f "$BACKEND_CONFIG_FILE" ]]; then
+    error "Terraform backend config not found: $BACKEND_CONFIG_FILE"
+    error "Create it from terraform/backend.hcl.example or run ./scripts/bootstrap-tfstate-backend.sh first."
+    exit 1
+  fi
+
   if ! az account show >/dev/null 2>&1; then
     error "Azure CLI is not authenticated. Run 'az login' first."
     exit 1
@@ -138,7 +148,7 @@ check_resource_group_state() {
 }
 
 run_terraform_init() {
-  terraform -chdir="$TERRAFORM_DIR" init
+  terraform -chdir="$TERRAFORM_DIR" init -backend-config="$BACKEND_CONFIG_FILE"
 }
 
 run_terraform_validate() {
@@ -153,7 +163,7 @@ run_destroy_plan() {
     -destroy \
     -var-file="$TFVARS_FILE" \
     -input=false \
-    -lock=false \
+    -lock-timeout="$TERRAFORM_LOCK_TIMEOUT" \
     -detailed-exitcode \
     -out="$PLAN_FILE"
   PLAN_EXIT_CODE=$?
@@ -174,13 +184,14 @@ run_destroy_plan() {
 }
 
 run_destroy_apply() {
-  terraform -chdir="$TERRAFORM_DIR" apply -input=false -lock=false "$PLAN_FILE"
+  terraform -chdir="$TERRAFORM_DIR" apply -input=false -lock-timeout="$TERRAFORM_LOCK_TIMEOUT" "$PLAN_FILE"
 }
 
 print_summary() {
   printf '\nDestroy summary\n'
   printf '%s\n' '---------------'
   printf 'TFVARS: %s\n' "$TFVARS_FILE"
+  printf 'Backend: %s\n' "$BACKEND_CONFIG_FILE"
   printf 'Plan:   %s\n' "$(display_plan_path)"
   printf 'RG:     %s\n' "$RESOURCE_GROUP"
 
@@ -191,9 +202,9 @@ print_summary() {
 
   if [[ "$AUTO_APPROVE" == false ]]; then
     printf '\nPlan de destruccion creado. Para eliminar la infraestructura:\n'
-    printf 'terraform -chdir=terraform apply -input=false -lock=false %q\n' "$PLAN_FILE"
+    printf 'terraform -chdir=terraform apply -input=false -lock-timeout=%q %q\n' "$TERRAFORM_LOCK_TIMEOUT" "$PLAN_FILE"
     printf '\nO ejecuta el script completo:\n'
-    printf './scripts/destroy-infra.sh --auto-approve --wait\n'
+    printf './scripts/destroy-infra.sh --auto-approve --wait --backend-config %q\n' "$BACKEND_CONFIG_FILE"
   else
     printf '\nDestroy aplicado. Puedes reejecutar el script para verificar idempotencia.\n'
   fi
@@ -204,6 +215,11 @@ while [[ $# -gt 0 ]]; do
     --tfvars)
       [[ $# -ge 2 ]] || { error "Missing value for --tfvars"; exit 2; }
       TFVARS_FILE="$(resolve_path "$2")"
+      shift 2
+      ;;
+    --backend-config)
+      [[ $# -ge 2 ]] || { error "Missing value for --backend-config"; exit 2; }
+      BACKEND_CONFIG_FILE="$(resolve_path "$2")"
       shift 2
       ;;
     --plan-file)

@@ -1,0 +1,11 @@
+# Copiar a backend.hcl o generar con ../scripts/bootstrap-tfstate-backend.sh
+# Este archivo no lleva secretos. Solo define donde vive el state remoto.
+
+resource_group_name  = "rg-privintra-lab-tfstate"
+storage_account_name = "stprivintralabtf001"
+container_name       = "tfstate"
+key                  = "azure-hubspoke-private-intranet.tfstate"
+
+# Si tu organizacion bloquea el uso de account keys, habilita AAD y otorga
+# Storage Blob Data Contributor a cada integrante del equipo sobre la cuenta.
+# use_azuread_auth = true

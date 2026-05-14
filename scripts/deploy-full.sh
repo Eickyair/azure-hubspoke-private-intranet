@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TERRAFORM_DIR="$ROOT_DIR/terraform"
 TFVARS_FILE="$TERRAFORM_DIR/main.tfvars"
+BACKEND_CONFIG_FILE="${TF_BACKEND_CONFIG_FILE:-$TERRAFORM_DIR/backend.hcl}"
 PLAN_FILE="tfplan-full-deploy"
 AUTO_APPROVE=false
 SKIP_INIT=false
@@ -14,6 +15,9 @@ SKIP_IMAGES=false
 DB_TASK="reset-demo"
 DIAGNOSTICS_MAX_ATTEMPTS="${DIAGNOSTICS_MAX_ATTEMPTS:-5}"
 DIAGNOSTICS_RETRY_DELAY="${DIAGNOSTICS_RETRY_DELAY:-30}"
+TERRAFORM_APPLY_MAX_ATTEMPTS="${TERRAFORM_APPLY_MAX_ATTEMPTS:-3}"
+TERRAFORM_APPLY_RETRY_DELAY="${TERRAFORM_APPLY_RETRY_DELAY:-60}"
+TERRAFORM_LOCK_TIMEOUT="${TERRAFORM_LOCK_TIMEOUT:-5m}"
 SUMMARY_MODE="full"
 
 declare -A PHASE_STATUS=()
@@ -37,6 +41,7 @@ Deploy completo del laboratorio: build de prebuilts, Terraform, diagnosticos y p
 
 Options:
   --tfvars <path>          Ruta al archivo tfvars. Default: terraform/main.tfvars
+  --backend-config <path>  Ruta al backend.hcl. Default: terraform/backend.hcl
   --plan-file <name>       Nombre o ruta del plan file. Default: tfplan-full-deploy
   --auto-approve           Ejecuta terraform apply y continua con diagnosticos/postdeploy
   --skip-init              Omite terraform init
@@ -49,6 +54,7 @@ Options:
 
 Examples:
   ./scripts/deploy-full.sh
+  ./scripts/deploy-full.sh --backend-config terraform/backend.hcl
   ./scripts/deploy-full.sh --auto-approve --db-task reset-demo
   ./scripts/deploy-full.sh --tfvars terraform/main.tfvars --plan-file tfplan-lab
 EOF
@@ -141,6 +147,12 @@ require_prerequisites() {
     exit 1
   fi
 
+  if [[ "$SKIP_INIT" == false && ! -f "$BACKEND_CONFIG_FILE" ]]; then
+    error "Terraform backend config not found: $BACKEND_CONFIG_FILE"
+    error "Create it from terraform/backend.hcl.example or run ./scripts/bootstrap-tfstate-backend.sh first."
+    exit 1
+  fi
+
   if ! az account show >/dev/null 2>&1; then
     error "Azure CLI is not authenticated. Run 'az login' first."
     exit 1
@@ -189,7 +201,7 @@ run_build() {
 }
 
 run_terraform_init() {
-  terraform -chdir="$TERRAFORM_DIR" init
+  terraform -chdir="$TERRAFORM_DIR" init -backend-config="$BACKEND_CONFIG_FILE"
 }
 
 run_terraform_validate() {
@@ -197,11 +209,53 @@ run_terraform_validate() {
 }
 
 run_terraform_plan() {
-  terraform -chdir="$TERRAFORM_DIR" plan -var-file="$TFVARS_FILE" -input=false -lock=false -out="$PLAN_FILE"
+  terraform -chdir="$TERRAFORM_DIR" plan -var-file="$TFVARS_FILE" -input=false -lock-timeout="$TERRAFORM_LOCK_TIMEOUT" -out="$PLAN_FILE"
+}
+
+is_retryable_terraform_apply_error() {
+  local output_file="$1"
+
+  grep -q 'AnotherOperationInProgress' "$output_file"
 }
 
 run_terraform_apply() {
-  terraform -chdir="$TERRAFORM_DIR" apply -input=false -lock=false "$PLAN_FILE"
+  local attempt=1
+  local output_file
+  local rc=0
+
+  output_file="$(mktemp)"
+
+  while (( attempt <= TERRAFORM_APPLY_MAX_ATTEMPTS )); do
+    : >"$output_file"
+
+    set +e
+    terraform -chdir="$TERRAFORM_DIR" apply -input=false -lock-timeout="$TERRAFORM_LOCK_TIMEOUT" "$PLAN_FILE" 2>&1 | tee "$output_file"
+    rc=${PIPESTATUS[0]}
+    set -e
+
+    if [[ $rc -eq 0 ]]; then
+      rm -f "$output_file"
+      return 0
+    fi
+
+    if ! is_retryable_terraform_apply_error "$output_file"; then
+      rm -f "$output_file"
+      return $rc
+    fi
+
+    if (( attempt == TERRAFORM_APPLY_MAX_ATTEMPTS )); then
+      error "Terraform apply exhausted ${TERRAFORM_APPLY_MAX_ATTEMPTS} attempts after Azure reported AnotherOperationInProgress."
+      rm -f "$output_file"
+      return $rc
+    fi
+
+    warn "Terraform apply hit Azure AnotherOperationInProgress on attempt ${attempt}/${TERRAFORM_APPLY_MAX_ATTEMPTS}; retrying in ${TERRAFORM_APPLY_RETRY_DELAY}s."
+    sleep "$TERRAFORM_APPLY_RETRY_DELAY"
+    attempt=$((attempt + 1))
+  done
+
+  rm -f "$output_file"
+  return $rc
 }
 
 load_outputs() {
@@ -308,6 +362,7 @@ print_summary() {
   done
 
   printf '\nTFVARS: %s\n' "$TFVARS_FILE"
+  printf 'Backend:%s\n' " $BACKEND_CONFIG_FILE"
   printf 'Plan:   %s\n' "$(display_plan_path)"
 
   if [[ -n "$RESOURCE_GROUP" && -n "$JUMPBOX_VM" ]]; then
@@ -325,7 +380,7 @@ print_summary() {
 
   if [[ "$SUMMARY_MODE" == "plan-only" ]]; then
     printf '\nPlan creado sin apply. Para continuar manualmente:\n'
-    printf 'terraform -chdir=terraform apply -input=false -lock=false %q\n' "$PLAN_FILE"
+    printf 'terraform -chdir=terraform apply -input=false -lock-timeout=%q %q\n' "$TERRAFORM_LOCK_TIMEOUT" "$PLAN_FILE"
   fi
 
   printf '\nComandos utiles:\n'
@@ -339,6 +394,11 @@ while [[ $# -gt 0 ]]; do
     --tfvars)
       [[ $# -ge 2 ]] || { error "Missing value for --tfvars"; exit 2; }
       TFVARS_FILE="$(resolve_path "$2")"
+      shift 2
+      ;;
+    --backend-config)
+      [[ $# -ge 2 ]] || { error "Missing value for --backend-config"; exit 2; }
+      BACKEND_CONFIG_FILE="$(resolve_path "$2")"
       shift 2
       ;;
     --plan-file)

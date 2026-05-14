@@ -17,10 +17,58 @@ Esta carpeta implementa la infraestructura de la practica en un unico Resource G
 ```bash
 cd terraform
 cp main.tfvars.example main.tfvars
-terraform init
+cp backend.hcl.example backend.hcl
+terraform init -backend-config="backend.hcl"
 terraform validate
-terraform plan -var-file="main.tfvars"
+terraform plan -var-file="main.tfvars" -lock-timeout=5m
 ```
+
+## Backend remoto para trabajo en equipo
+
+Este proyecto ya queda preparado para usar un backend remoto `azurerm` en Blob Storage. Eso permite:
+
+- Un solo state compartido por el equipo.
+- Locking nativo del state para evitar applies concurrentes.
+- Colaboracion sin depender de `terraform.tfstate` local.
+
+Bootstrap recomendado desde la raiz del repositorio:
+
+```bash
+./scripts/bootstrap-tfstate-backend.sh
+terraform -chdir=terraform init -migrate-state -backend-config="backend.hcl"
+```
+
+El script crea o reutiliza un Resource Group dedicado para el backend, una Storage Account Standard LRS y el contenedor `tfstate`. Luego escribe `terraform/backend.hcl`, que esta ignorado por Git.
+
+Si el equipo ya no tiene state local y solo necesita reconfigurar Terraform en otra maquina:
+
+```bash
+terraform -chdir=terraform init -reconfigure -backend-config="backend.hcl"
+```
+
+Si tu organizacion no permite usar account keys para el backend, activa `use_azuread_auth = true` en `backend.hcl` y asigna `Storage Blob Data Contributor` sobre la cuenta de Storage a cada integrante del equipo.
+
+## Operacion colaborativa
+
+Con el backend remoto ya configurado, el proyecto puede ser operado por varias personas sobre la misma infraestructura. La condicion importante es que todos usen el mismo backend y que nadie vuelva a trabajar con el state local como fuente principal.
+
+Flujo esperado para una maquina nueva:
+
+```bash
+az login
+../scripts/bootstrap-tfstate-backend.sh
+terraform init -reconfigure -backend-config="backend.hcl"
+```
+
+Usa `terraform init -migrate-state -backend-config="backend.hcl"` solo cuando todavia exista un state local que deba moverse al backend remoto. Despues de esa migracion inicial, el resto del equipo debe usar `-reconfigure`.
+
+Reglas recomendadas para colaborar sin pisarse cambios:
+
+- No usar `-lock=false`.
+- No commitear `backend.hcl`.
+- Ejecutar `terraform plan` antes de `terraform apply`.
+- Reconfigurar Terraform en cada maquina nueva antes de operar.
+- Mantener permisos de Azure consistentes para todo el equipo sobre la suscripcion y la cuenta de Storage del backend.
 
 Antes del `plan`, ajustar en `main.tfvars`:
 
@@ -46,6 +94,8 @@ Antes de ejecutar `terraform plan` o `terraform apply`, generar los paquetes pre
 ```bash
 ../scripts/build-spoke1-prebuilts.sh
 ```
+
+Para ejecucion colaborativa, evita `-lock=false`. Usa siempre `-lock-timeout=5m` o el valor que tu equipo defina para esperar por el lock del state remoto.
 
 El script crea los ZIP en `terraform/.terraform-build/prebuilt/` con nombres `webapp-prebuilt-<hash>.zip`, `admin-prebuilt-<hash>.zip` y `api-prebuilt-<hash>.zip`. Esa carpeta es un artefacto local ignorado por Git; Terraform toma esos archivos y los publica en el Storage Account de paquetes.
 

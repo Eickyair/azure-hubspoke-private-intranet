@@ -1,0 +1,152 @@
+---
+title: Diagrama 5 - Topologia de red consolidada
+---
+%%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 48, "rankSpacing": 68}, "themeVariables": {"fontFamily": "Trebuchet MS", "fontSize": "13px"}} }%%
+flowchart LR
+    title["Diagrama 5 - Topologia de red consolidada<br/>VNets, subnets y servicios por Hub y Spoke"]:::title
+    legend["Leyenda<br/>Verde = Hub<br/>Azul = Aplicaciones<br/>Amarillo = Datos<br/>Morado = Analitica<br/>Caja gris = subnet<br/>Linea solida = peering o trafico principal<br/>Linea punteada = DNS privado, Private Link o gestion"]:::legend
+    title --- legend
+
+    subgraph hub["Hub VNet 10.10.0.0/16"]
+        direction TB
+        hubcore["Conectividad compartida<br/>Peerings, DNS y gestion"]:::hub
+
+        subgraph gwsubnet["GatewaySubnet 10.10.0.0/24"]
+            direction TB
+            vpn["Azure VPN Gateway P2S<br/>Condicional en Terraform<br/>Actual: desactivado en main.tfvars"]:::hub
+        end
+
+        subgraph bastionsubnet["AzureBastionSubnet 10.10.1.0/26"]
+            direction TB
+            bastion["Azure Bastion"]:::hub
+        end
+
+        subgraph edgesubnet["snet-privintra-lab-001-hub-edge 10.10.2.0/24"]
+            direction TB
+            agw["Application Gateway WAF<br/>IP privada 10.10.2.10<br/>Hosts: intranet, admin y api.northwind.lab"]:::hub
+        end
+
+        subgraph pesubnet["snet-privintra-lab-001-hub-pe 10.10.3.0/24"]
+            direction TB
+            kvpe["Private Endpoint de Key Vault"]:::hub
+        end
+
+        subgraph mgmtsubnet["snet-privintra-lab-001-hub-mgmt 10.10.4.0/24"]
+            direction TB
+            jumpbox["Jumpbox Windows VM"]:::hub
+        end
+
+        dns["DNS privado centralizado<br/>northwind.lab<br/>privatelink.azurewebsites.net<br/>privatelink.mysql.database.azure.com<br/>privatelink.blob.core.windows.net<br/>privatelink.vaultcore.azure.net"]:::hub
+        shared["Key Vault<br/>Log Analytics"]:::hub
+    end
+
+    subgraph spoke1["Spoke 1 VNet 10.20.0.0/16"]
+        direction TB
+        sp1core["Capa de aplicaciones privadas"]:::app
+
+        subgraph sp1appsubnet["snet-privintra-lab-001-spoke1-appsvc 10.20.1.0/24"]
+            direction TB
+            apps["App Service Plan Linux<br/>WebApp Intranet<br/>WebApp Admin<br/>API FastAPI<br/>Admin API FastAPI"]:::app
+        end
+
+        subgraph sp1pesubnet["snet-privintra-lab-001-spoke1-pe 10.20.2.0/24"]
+            direction TB
+            appspe["Private Endpoints App Services<br/>intranet, admin, api y admin-api"]:::app
+        end
+    end
+
+    subgraph spoke2["Spoke 2 VNet 10.30.0.0/16"]
+        direction TB
+        sp2core["Capa de datos y documentos"]:::data
+
+        subgraph sp2mysqlsubnet["snet-privintra-lab-001-spoke2-mysql 10.30.1.0/24"]
+            direction TB
+            mysqlops["MySQL Flexible Servers<br/>App DB y Admin DB"]:::data
+        end
+
+        subgraph sp2pesubnet["snet-privintra-lab-001-spoke2-pe 10.30.2.0/24"]
+            direction TB
+            blobpe["Private Endpoint Blob"]:::data
+        end
+
+        blobdocs["Storage Account de documentos<br/>acceso privado por Blob PE"]:::data
+    end
+
+    subgraph spoke3["Spoke 3 VNet 10.40.0.0/16"]
+        direction TB
+        sp3core["Capa analitica privada"]:::analytics
+
+        subgraph sp3etlsubnet["snet-privintra-lab-001-spoke3-etl 10.40.1.0/24"]
+            direction TB
+            etl["VM Linux ETL<br/>10.40.1.20"]:::analytics
+        end
+
+        subgraph sp3dashsubnet["snet-privintra-lab-001-spoke3-dashboard 10.40.2.0/24"]
+            direction TB
+            dashboard["VM Linux Dashboard<br/>10.40.2.20<br/>kpi.northwind.lab"]:::analytics
+        end
+
+        subgraph sp3mysqlsubnet["snet-privintra-lab-001-spoke3-mysql 10.40.3.0/24"]
+            direction TB
+            mysqlanalytics["MySQL Flexible Server Analytics"]:::analytics
+        end
+    end
+
+    hubcore ---|"Peering Hub-Spoke"| sp1core
+    hubcore ---|"Peering Hub-Spoke"| sp2core
+    hubcore ---|"Peering Hub-Spoke"| sp3core
+    sp1core ---|"Peering directo"| sp2core
+    sp2core ---|"Peering directo"| sp3core
+
+    agw -->|"HTTPS privado"| appspe
+    appspe -.->|"Private Link"| apps
+    apps -->|"MySQL 3306"| mysqlops
+    apps -->|"HTTPS 443"| blobpe
+    blobpe -.->|"Private Link"| blobdocs
+
+    etl -->|"MySQL 3306"| mysqlops
+    etl -->|"MySQL 3306"| mysqlanalytics
+    dashboard -->|"MySQL 3306"| mysqlanalytics
+
+    dns -.->|"intranet, admin, api -> 10.10.2.10"| agw
+    dns -.->|"kpi -> 10.40.2.20"| dashboard
+    dns -.->|"Privatelink App Services"| appspe
+    dns -.->|"Privatelink MySQL"| mysqlops
+    dns -.->|"Privatelink MySQL"| mysqlanalytics
+    dns -.->|"Privatelink Blob"| blobpe
+    dns -.->|"Privatelink Vault"| kvpe
+    kvpe -.->|"Private Link"| shared
+
+    jumpbox -.->|"Gestion privada"| appspe
+    jumpbox -.->|"Gestion privada"| mysqlops
+    jumpbox -.->|"Gestion privada"| etl
+    jumpbox -.->|"Gestion privada"| dashboard
+    bastion -.->|"SSH"| etl
+    bastion -.->|"SSH"| dashboard
+    shared -.->|"Secretos"| apps
+    shared -.->|"Observabilidad"| etl
+    shared -.->|"Observabilidad"| dashboard
+
+    style hub fill:#f8fafc,stroke:#2e7d32,stroke-width:2px;
+    style spoke1 fill:#f8fafc,stroke:#1565c0,stroke-width:2px;
+    style spoke2 fill:#f8fafc,stroke:#b28704,stroke-width:2px;
+    style spoke3 fill:#f8fafc,stroke:#8e24aa,stroke-width:2px;
+    style gwsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style bastionsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style edgesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style pesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style mgmtsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style sp1appsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style sp1pesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style sp2mysqlsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style sp2pesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style sp3etlsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style sp3dashsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style sp3mysqlsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+
+    classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;
+    classDef legend fill:#f8fafc,stroke:#94a3b8,color:#334155;
+    classDef hub fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20,stroke-width:2px;
+    classDef app fill:#e3f2fd,stroke:#1565c0,color:#0d47a1,stroke-width:2px;
+    classDef data fill:#fff8e1,stroke:#b28704,color:#6d4c00,stroke-width:2px;
+    classDef analytics fill:#f3e5f5,stroke:#8e24aa,color:#4a148c,stroke-width:2px;

@@ -19,6 +19,7 @@ La arquitectura se separa en una vista general y una vista dedicada por modulo p
 - [Diagrama 2 - Spoke 1 / Aplicaciones](./spoke1-aplicaciones-detalle.mmd)
 - [Diagrama 3 - Spoke 2 / Datos y documentos](./spoke2-datos-detalle.mmd)
 - [Diagrama 4 - Spoke 3 / Analitica](./spoke3-analitica-detalle.mmd)
+- [Diagrama 5 - Topologia de red consolidada](./topologia-red-consolidada.mmd)
 
 ## Criterio de lectura
 

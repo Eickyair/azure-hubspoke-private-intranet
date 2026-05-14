@@ -2,6 +2,7 @@
 .terraform-build/
 *.tfstate
 *.tfstate.*
+backend.hcl
 main.tfvars
 crash.log
 crash.*.log

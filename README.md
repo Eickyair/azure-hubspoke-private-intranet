@@ -42,15 +42,63 @@ Valores que debes revisar antes del despliegue:
 - `jumpbox_admin_password`
 - `hub.vpn_root_certificate_data`, solo si habilitas VPN P2S
 
-### 3. Ejecutar el Script Unico
+### 3. Configurar State Remoto Compartido
+
+Para trabajar varias personas sobre la misma infraestructura, el estado ya no debe quedarse local. El repositorio ahora incluye backend remoto `azurerm` y un script para crear la Storage Account del state y escribir `terraform/backend.hcl`.
+
+```bash
+chmod +x scripts/bootstrap-tfstate-backend.sh
+./scripts/bootstrap-tfstate-backend.sh
+terraform -chdir=terraform init -migrate-state -backend-config="backend.hcl"
+```
+
+Si es una maquina nueva y el state ya fue migrado antes, reconfigura Terraform sin volver a mover el state:
+
+```bash
+terraform -chdir=terraform init -reconfigure -backend-config="backend.hcl"
+```
+
+`terraform/backend.hcl` esta ignorado por Git. Puedes partir de `terraform/backend.hcl.example` si prefieres crear el archivo manualmente.
+
+#### 3.1 Estado Actual Para Trabajo Colaborativo
+
+Con la configuracion actual, el proyecto ya esta listo para ser operado por varios colaboradores sobre la misma infraestructura, siempre que todos usen el mismo backend remoto y no vuelvan a trabajar con state local.
+
+Esto significa lo siguiente:
+
+- El state compartido vive en Azure Blob Storage mediante el backend `azurerm`.
+- `terraform plan` y `terraform apply` ahora esperan el lock del state remoto en vez de desactivarlo.
+- El archivo `terraform/backend.hcl` se queda local en cada maquina y no debe subirse al repositorio.
+
+#### 3.2 Flujo Para Un Colaborador Nuevo
+
+En una maquina nueva, un integrante del equipo debe hacer esto antes de tocar la infraestructura:
+
+```bash
+az login
+./scripts/bootstrap-tfstate-backend.sh
+terraform -chdir=terraform init -reconfigure -backend-config="backend.hcl"
+```
+
+Usa `-migrate-state` solo la primera vez que se mueve el state local al backend remoto. Una vez migrado, el resto del equipo debe usar `-reconfigure`.
+
+#### 3.3 Reglas De Operacion En Equipo
+
+- No ejecutar Terraform con `-lock=false`.
+- No crear ni mantener un `terraform.tfstate` local como fuente principal.
+- No subir `terraform/backend.hcl` ni archivos con secretos.
+- Si otra persona esta aplicando cambios, Terraform esperara el lock remoto hasta agotar el timeout configurado.
+- Antes de un `apply`, conviene ejecutar `git pull` y volver a correr `terraform plan` para evitar aplicar sobre codigo desactualizado.
+
+### 4. Ejecutar el Script Unico
 
 El script `scripts/deploy-full.sh` orquesta el flujo completo en este orden:
 
 1. Build de ZIPs prebuilt para Spoke 1.
-2. `terraform init`.
+2. `terraform init` con backend remoto.
 3. `terraform validate`.
-4. `terraform plan`.
-5. `terraform apply`, solo si pasas `--auto-approve`.
+4. `terraform plan` con locking del state.
+5. `terraform apply` con locking del state, solo si pasas `--auto-approve`.
 6. Diagnosticos desde la jumpbox.
 7. Postdeploy de bases de datos.
 8. Carga de imagenes al Storage privado de Spoke 2.
@@ -59,30 +107,55 @@ Uso recomendado:
 
 ```bash
 chmod +x scripts/deploy-full.sh
-./scripts/deploy-full.sh --auto-approve --db-task reset-demo
+./scripts/deploy-full.sh --backend-config terraform/backend.hcl --auto-approve --db-task reset-demo
 ```
 
 Modo seguro, solo hasta `plan`:
 
 ```bash
-./scripts/deploy-full.sh
+./scripts/deploy-full.sh --backend-config terraform/backend.hcl
 ```
 
 Ejemplos utiles:
 
 ```bash
-./scripts/deploy-full.sh --plan-file tfplan-lab
-./scripts/deploy-full.sh --auto-approve --skip-diagnostics
-./scripts/deploy-full.sh --auto-approve --skip-images --db-task all
+./scripts/deploy-full.sh --backend-config terraform/backend.hcl --plan-file tfplan-lab
+./scripts/deploy-full.sh --backend-config terraform/backend.hcl --auto-approve --skip-diagnostics
+./scripts/deploy-full.sh --backend-config terraform/backend.hcl --auto-approve --skip-images --db-task all
 ```
 
 El script se detiene antes de poblar datos si los diagnosticos reportan `FAIL`. Las advertencias conocidas no bloquean el flujo.
 
-### 4. Flujo Manual, Paso a Paso
+### 5. Flujo Manual, Paso a Paso
 
-Si necesitas ejecutar fases individuales o depurar el proceso, puedes seguir usando el flujo manual.
+Si vas a modificar solo la infraestructura y quieres omitir `deploy-full`, este es el flujo recomendado. El build de paquetes de Spoke 1 solo hace falta si tambien cambiaste codigo de las aplicaciones.
 
-#### 4.1 Construir Paquetes de Spoke 1
+#### 5.1 Reconfigurar el backend y verificar el state remoto
+
+```bash
+terraform -chdir=terraform init -reconfigure -backend-config="backend.hcl"
+terraform -chdir=terraform state list | head
+```
+
+El primer comando apunta Terraform al backend remoto compartido. El segundo confirma que tu maquina puede leer el state en Azure Blob Storage.
+
+#### 5.2 Archivos locales que puedes borrar
+
+Con el backend remoto ya activo, puedes borrar sin afectar el state compartido:
+
+- `terraform/terraform.tfstate` y `terraform/terraform.tfstate.*`, si existen de iteraciones anteriores.
+- `terraform/tfplan*` y cualquier archivo de plan temporal como `terraform/tfplan-change`.
+- `terraform/diagnostics.ps1` y `terraform/diagnostics-output.txt`, porque se regeneran.
+- `terraform/.terraform/`, si necesitas reinicializar modulos o providers.
+- `terraform/.terraform-build/prebuilt/`, si quieres forzar la regeneracion de paquetes de Spoke 1.
+
+Conviene conservar:
+
+- `terraform/backend.tf`, `terraform/backend.hcl` y `terraform/backend.hcl.example`.
+- `terraform/.terraform.lock.hcl`.
+- `terraform/main.tfvars` y el codigo Terraform bajo `terraform/`.
+
+#### 5.3 Construir Paquetes de Spoke 1 solo si cambiaste aplicaciones
 
 Los App Services de Spoke 1 usan paquetes ZIP preconstruidos con dependencias Python. Generarlos antes de planear o aplicar Terraform:
 
@@ -93,35 +166,53 @@ chmod +x scripts/build-spoke1-prebuilts.sh
 
 El script deja los artefactos en `terraform/.terraform-build/prebuilt/`.
 
-#### 4.2 Inicializar y Validar Terraform
+#### 5.4 Formatear, validar y generar un plan guardado
 
 ```bash
-terraform -chdir=terraform init
 terraform -chdir=terraform fmt -recursive
 terraform -chdir=terraform validate
-terraform -chdir=terraform plan -var-file="main.tfvars" -input=false -out=tfplan
+terraform -chdir=terraform plan \
+    -var-file="main.tfvars" \
+    -input=false \
+    -lock-timeout=5m \
+    -out=tfplan-change
+terraform -chdir=terraform show tfplan-change
 ```
 
-#### 4.3 Crear la Infraestructura
+Ese `plan` no cambia nada en Azure. Sirve para calcular los cambios, guardarlos en un archivo local y revisar exactamente eso antes del `apply`. La ventaja de usar `-out=tfplan-change` es que luego aplicas el mismo plan que inspeccionaste, sin recalcularlo entre medio.
+
+#### 5.5 Aplicar la infraestructura
 
 ```bash
-terraform -chdir=terraform apply -input=false tfplan
+terraform -chdir=terraform apply \
+    -input=false \
+    -lock-timeout=5m \
+    tfplan-change
 ```
 
 Tambien puedes aplicar directamente sin plan guardado:
 
 ```bash
-terraform -chdir=terraform apply -var-file="main.tfvars" -input=false -auto-approve
+terraform -chdir=terraform apply -var-file="main.tfvars" -input=false -lock-timeout=5m -auto-approve
 ```
 
-Verifica los outputs principales:
+Cuando trabajen varias personas o el cambio sea sensible, conviene preferir `plan` seguido de `apply` sobre el archivo guardado.
+
+#### 5.6 Verificar outputs y recursos del state
 
 ```bash
 terraform -chdir=terraform output
 terraform -chdir=terraform output -json | jq '{resource_group_name, jumpbox_access, spoke2_mysql_fqdns, internal_urls}'
+terraform -chdir=terraform state list | head
 ```
 
-#### 4.4 Ejecutar Diagnosticos de Infraestructura
+Si ya no necesitas el plan local, puedes borrarlo al cerrar la iteracion:
+
+```bash
+rm -f terraform/tfplan-change
+```
+
+#### 5.7 Ejecutar Diagnosticos de Infraestructura
 
 Genera y ejecuta los diagnosticos desde la jumpbox con Azure Run Command:
 
@@ -135,7 +226,7 @@ az vm run-command invoke \
     --output table
 ```
 
-#### 4.5 Poblar Bases de Datos Post-Deploy
+#### 5.8 Poblar Bases de Datos Post-Deploy
 
 Las bases MySQL se crean vacias con Terraform. La carga de esquemas y datos demo se ejecuta despues del despliegue desde la jumpbox privada.
 
@@ -160,7 +251,7 @@ products        10
 sales_history   0
 ```
 
-#### 4.6 Cargar Imagenes al Storage Account Post-Deploy
+#### 5.9 Cargar Imagenes al Storage Account Post-Deploy
 
 Las URLs origen se leen desde `src/spoke2/list-images.txt`. El runner manda un script Python a la jumpbox, descarga las imagenes, las sube al contenedor Blob privado y actualiza `products.image_blob` en MySQL.
 
@@ -178,7 +269,7 @@ verified_blobs          10
 products_with_storage_urls      10
 ```
 
-### 5. Probar URLs Internas
+### 6. Probar URLs Internas
 
 Consulta las URLs internas esperadas:
 
@@ -188,19 +279,19 @@ terraform -chdir=terraform output internal_urls
 
 El acceso a las aplicaciones privadas requiere estar dentro de la red privada, por ejemplo mediante Azure Bastion/jumpbox o VPN P2S si esta habilitada.
 
-### 6. Destruir el Laboratorio
+### 7. Destruir el Laboratorio
 
 Cuando termines la practica, destruye los recursos para evitar costos:
 
 ```bash
 chmod +x scripts/destroy-infra.sh
-./scripts/destroy-infra.sh --auto-approve --wait
+./scripts/destroy-infra.sh --backend-config terraform/backend.hcl --auto-approve --wait
 ```
 
 El script es idempotente: si no hay recursos pendientes o el Resource Group ya esta en proceso de borrado, termina sin volver a iniciar acciones destructivas. Para revisar el plan antes de aplicar:
 
 ```bash
-./scripts/destroy-infra.sh
+./scripts/destroy-infra.sh --backend-config terraform/backend.hcl
 ```
 
 ## Architecture

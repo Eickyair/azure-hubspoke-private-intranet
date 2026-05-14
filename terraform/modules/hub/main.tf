@@ -142,6 +142,8 @@ resource "azurerm_private_endpoint" "key_vault" {
   subnet_id           = azurerm_subnet.shared_private_endpoint.id
   tags                = var.tags
 
+  depends_on = [azurerm_subnet.management]
+
   timeouts {
     create = "60m"
     delete = "60m"
@@ -175,6 +177,8 @@ resource "azurerm_bastion_host" "main" {
   resource_group_name = var.resource_group_name
   sku                 = "Standard"
   tags                = var.tags
+
+  depends_on = [azurerm_subnet.management]
 
   ip_configuration {
     name                 = "default"
@@ -304,6 +308,8 @@ resource "azurerm_virtual_network_gateway" "vpn" {
   generation          = "Generation1"
   tags                = var.tags
 
+  depends_on = [azurerm_subnet.management]
+
   ip_configuration {
     name                          = "default"
     public_ip_address_id          = azurerm_public_ip.vpn[0].id
@@ -363,6 +369,8 @@ resource "azurerm_application_gateway" "main" {
   resource_group_name = var.resource_group_name
   firewall_policy_id  = azurerm_web_application_firewall_policy.main[0].id
   tags                = var.tags
+
+  depends_on = [azurerm_subnet.management]
 
   sku {
     name     = "WAF_v2"
