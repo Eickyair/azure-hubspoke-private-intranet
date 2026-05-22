@@ -2,6 +2,12 @@
 
 Private enterprise intranet platform on Azure built with a Hub-and-Spoke architecture, provisioned with Terraform and integrated with Python services, MySQL databases, private storage, analytics, and secure access through Point-to-Site VPN.
 
+## Quickstart
+
+Si te integras por primera vez al proyecto, usa esta guia rapida antes del despliegue detallado:
+
+- [docs/quickstart.md](docs/quickstart.md)
+
 ## Despliegue Completo
 
 Ejecutar los comandos desde la raiz del repositorio. El flujo recomendado ahora es usar un solo script orquestador que construye los paquetes de Spoke 1, ejecuta Terraform en orden, valida la infraestructura desde la jumpbox y, solo si no hay `FAIL`, puebla MySQL y carga imagenes en Blob Storage privado.
