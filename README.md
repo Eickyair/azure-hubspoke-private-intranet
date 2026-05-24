@@ -7,6 +7,7 @@ Private enterprise intranet platform on Azure built with a Hub-and-Spoke archite
 Si te integras por primera vez al proyecto, usa esta guia rapida antes del despliegue detallado:
 
 - [docs/quickstart.md](QUICKSTART.md)
+- [docs/guia-configuracion-vpn.md](docs/guia-configuracion-vpn.md)
 
 ## Despliegue Completo
 
