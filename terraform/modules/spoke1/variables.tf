@@ -90,3 +90,9 @@ variable "app_environment" {
   })
   sensitive = true
 }
+
+variable "vpn_client_address_prefixes" {
+  type        = list(string)
+  default     = []
+  description = "Lista de prefijos de red para clientes VPN P2S."
+}

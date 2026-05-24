@@ -263,6 +263,18 @@ resource "azurerm_network_security_group" "private_endpoint" {
   }
 
   security_rule {
+    name                       = "AllowVpnClientsHttps"
+    priority                   = 130
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_ranges    = ["80", "443"]
+    source_address_prefixes    = length(var.vpn_client_address_prefixes) > 0 ? var.vpn_client_address_prefixes : ["172.16.10.0/24"]
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
     name                       = "DenyAllInbound"
     priority                   = 4096
     direction                  = "Inbound"

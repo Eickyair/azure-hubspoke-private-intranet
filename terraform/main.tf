@@ -139,6 +139,7 @@ module "spoke3" {
   vm_admin_ssh_public_key      = var.vm_admin_ssh_public_key
   hub_bastion_subnet_prefix    = var.hub.bastion_subnet_prefix
   hub_management_subnet_prefix = var.hub.management_subnet_prefix
+  vpn_client_address_prefixes  = var.hub.p2s_address_space
   source_paths = {
     dashboard  = abspath("${path.module}/../src/spoke3/dashboard")
     etl_runner = abspath("${path.module}/../src/spoke3/etl-runner")
@@ -169,6 +170,7 @@ module "spoke1" {
   internal_dns_zone_name          = var.internal_domains.zone
   hub_edge_subnet_prefix          = var.hub.edge_subnet_prefix
   hub_management_subnet_prefix    = var.hub.management_subnet_prefix
+  vpn_client_address_prefixes     = var.hub.p2s_address_space
   source_paths = {
     catalog_webapp = abspath("${path.module}/../src/spoke1/catalog/webapp")
     catalog_api    = abspath("${path.module}/../src/spoke1/catalog/api")

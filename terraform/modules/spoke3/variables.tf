@@ -91,3 +91,9 @@ variable "hub_management_subnet_prefix" {
   type        = string
   description = "CIDR del hub management subnet (Jumpbox). Permite acceso API/Streamlit inbound para pruebas."
 }
+
+variable "vpn_client_address_prefixes" {
+  type        = list(string)
+  default     = []
+  description = "Lista de prefijos de red para clientes VPN P2S."
+}
