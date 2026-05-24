@@ -25,6 +25,7 @@ resource "azurerm_virtual_network" "hub" {
   resource_group_name = var.resource_group_name
   address_space       = var.config.address_space
   tags                = var.tags
+  dns_servers         = var.config.enable_vpn_gateway ? ["10.10.4.50"] : null
 }
 
 resource "azurerm_subnet" "gateway" {
@@ -292,6 +293,7 @@ resource "azurerm_public_ip" "vpn" {
   resource_group_name = var.resource_group_name
   allocation_method   = "Static"
   sku                 = "Standard"
+  zones               = ["1", "2", "3"]
   tags                = var.tags
 }
 
@@ -304,7 +306,7 @@ resource "azurerm_virtual_network_gateway" "vpn" {
   vpn_type            = "RouteBased"
   active_active       = false
   enable_bgp          = false
-  sku                 = "VpnGw1"
+  sku                 = "VpnGw1AZ"
   generation          = "Generation1"
   tags                = var.tags
 
@@ -461,4 +463,140 @@ resource "azurerm_application_gateway" "main" {
       backend_http_settings_name = "bhs-${request_routing_rule.key}"
     }
   }
+}
+
+# ── DNS Forwarder Virtual Machine ───────────────────────────────────
+
+resource "azurerm_network_interface" "dns" {
+  count               = var.config.enable_vpn_gateway ? 1 : 0
+  name                = "nic-${var.name_prefix}-dns-forwarder"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  ip_configuration {
+    name                          = "ipconfig1"
+    subnet_id                     = azurerm_subnet.management.id
+    private_ip_address_allocation = "Static"
+    private_ip_address            = "10.10.4.50"
+  }
+}
+
+resource "azurerm_network_security_group" "dns" {
+  count               = var.config.enable_vpn_gateway ? 1 : 0
+  name                = "nsg-${var.name_prefix}-hub-dns"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  security_rule {
+    name                       = "AllowVpnDnsUdp"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "53"
+    source_address_prefixes    = concat(var.config.address_space, var.config.p2s_address_space)
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowVpnDnsTcp"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "53"
+    source_address_prefixes    = concat(var.config.address_space, var.config.p2s_address_space)
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowMgmtSsh"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefixes    = [var.config.management_subnet_prefix, var.config.bastion_subnet_prefix]
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_network_interface_security_group_association" "dns" {
+  count                     = var.config.enable_vpn_gateway ? 1 : 0
+  network_interface_id      = azurerm_network_interface.dns[0].id
+  network_security_group_id = azurerm_network_security_group.dns[0].id
+}
+
+resource "azurerm_linux_virtual_machine" "dns" {
+  count                           = var.config.enable_vpn_gateway ? 1 : 0
+  name                            = "vm-${var.name_prefix}-dns-01"
+  resource_group_name             = var.resource_group_name
+  location                        = var.location
+  size                            = "Standard_B2ls_v2"
+  admin_username                  = "dnsadmin"
+  admin_password                  = "DnsServerP@ssw0rd!"
+  disable_password_authentication = false
+  network_interface_ids           = [azurerm_network_interface.dns[0].id]
+  tags                            = var.tags
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  custom_data = base64encode(<<-EOF
+              #!/bin/bash
+              # 1. Usar temporalmente el DNS de Azure para la descarga e instalación de paquetes
+              echo "nameserver 168.63.129.16" > /etc/resolv.conf
+
+              # 2. Instalar dnsmasq
+              apt-get update
+              apt-get install -y dnsmasq
+
+              # 3. Deshabilitar systemd-resolved para liberar el puerto 53
+              systemctl stop systemd-resolved
+              systemctl disable systemd-resolved
+
+              # 4. Configurar dnsmasq como reenviador al DNS interno de Azure (168.63.129.16)
+              cat <<EOT > /etc/dnsmasq.conf
+              no-resolv
+              server=168.63.129.16
+              interface=*
+              bind-interfaces
+              cache-size=1000
+              log-queries
+              EOT
+
+              # 5. Establecer resolv.conf local definitivo para el sistema local
+              echo "nameserver 127.0.0.1" > /etc/resolv.conf
+
+              # 6. Habilitar y reiniciar dnsmasq
+              systemctl restart dnsmasq
+              systemctl enable dnsmasq
+              EOF
+  )
 }

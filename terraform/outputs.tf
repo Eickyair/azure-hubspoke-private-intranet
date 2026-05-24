@@ -55,3 +55,8 @@ output "jumpbox_access" {
     bastion    = "Usar Azure Bastion en el Resource Group para abrir RDP privado"
   }
 }
+
+output "dns_forwarder_private_ip" {
+  description = "IP privada de la VM DNS Forwarder."
+  value       = module.hub.dns_forwarder_private_ip
+}
