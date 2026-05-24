@@ -4,41 +4,44 @@ title: Diagrama 3 - Spoke 2 / Datos y documentos
 %%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 55, "rankSpacing": 72}, "themeVariables": {"fontFamily": "Trebuchet MS", "fontSize": "13px"}} }%%
 flowchart TB
     title["Diagrama 3 - Spoke 2 / Datos y documentos<br/>MySQL y Blob Storage privados"]:::title
-    legend["Leyenda<br/>Amarillo = recurso del modulo<br/>Caja gris = contenedor de red<br/>Bloque suelto = dependencia externa con color del modulo origen<br/>Rojo = servicio externo real<br/>Linea solida = trafico principal<br/>Linea punteada = private link o resolucion"]:::legend
+    legend["Leyenda<br/>Amarillo = recurso del modulo<br/>Caja gris = contenedor de red<br/>Bloque suelto = dependencia externa con color del modulo origen<br/>Rojo = servicio externo real<br/>Linea solida = trafico principal<br/>Linea punteada = VNet Integration, Private Link o resolucion"]:::legend
     title --- legend
 
     subgraph spoke2["Spoke 2 VNet 10.30.0.0/16"]
         direction LR
-        subgraph pesubnet["PrivateEndpointSubnet 10.30.1.0/24"]
+        subgraph mysqlsubnet["MySQLSubnet 10.30.1.0/24 (Delegated)"]
             direction TB
-            pemysqlapp["pe-mysql-app<br/>10.30.1.10<br/>mysql-app.privatelink.mysql.database.azure.com"]:::data
-            pemysqladmin["pe-mysql-admin<br/>10.30.1.11<br/>mysql-admin.privatelink.mysql.database.azure.com"]:::data
-            peblob["pe-blob-docs<br/>10.30.1.12<br/>stnorthwinddocs.privatelink.blob.core.windows.net"]:::data
+            mysql_app["mysql-app-db<br/>MySQL Flexible Server<br/>mysql-app.privatelink.mysql.database.azure.com"]:::data
+            mysql_admin["mysql-admin-db<br/>MySQL Flexible Server<br/>mysql-admin.privatelink.mysql.database.azure.com"]:::data
         end
 
-        dataservices["Servicios PaaS privados<br/>MySQL App DB<br/>MySQL Admin DB<br/>Storage Account / Blob"]:::data
+        subgraph pesubnet["PrivateEndpointSubnet 10.30.2.0/24"]
+            direction TB
+            peblob["pe-blob-docs<br/>stnorthwinddocs.privatelink.blob.core.windows.net"]:::data
+        end
+
+        blobdocs["Storage Account / Blob<br/>documents"]:::data
     end
 
     api["[Spoke 1] api-private"]:::app
     etl["[Spoke 3] etl-runner-01"]:::analytics
     dns["[Hub] Private DNS Zones"]:::hub
 
-    api -->|"MySQL :3306"| pemysqlapp
-    api -->|"MySQL :3306"| pemysqladmin
+    api -->|"MySQL :3306"| mysql_app
+    api -->|"MySQL :3306"| mysql_admin
     api -->|"HTTPS :443"| peblob
-    etl -->|"MySQL :3306"| pemysqlapp
-    etl -->|"MySQL :3306"| pemysqladmin
-    pemysqlapp -.->|"PrivLink"| dataservices
-    pemysqladmin -.->|"PrivLink"| dataservices
-    peblob -.->|"PrivLink"| dataservices
-    dns -.->|"DNS :53"| pemysqlapp
-    dns -.->|"DNS :53"| pemysqladmin
+    etl -->|"MySQL :3306"| mysql_app
+    etl -->|"MySQL :3306"| mysql_admin
+    peblob -.->|"Private Link"| blobdocs
+    dns -.->|"DNS :53"| mysql_app
+    dns -.->|"DNS :53"| mysql_admin
     dns -.->|"DNS :53"| peblob
 
     api ~~~ etl
     etl ~~~ dns
 
     style spoke2 fill:#f8fafc,stroke:#b28704,stroke-width:2px;
+    style mysqlsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
     style pesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
 
     classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;

@@ -358,7 +358,7 @@ flowchart TB
         direction LR
         subgraph gwsubnet["GatewaySubnet 10.10.0.0/24"]
             direction TB
-            vpn["vpn-gw-hub-01<br/>Azure VPN Gateway<br/>Pool P2S 172.16.10.0/24"]:::hub
+            vpn["vpn-gw-hub-01<br/>Azure VPN Gateway VpnGw1AZ<br/>Pool P2S 172.16.10.0/24"]:::hub
         end
 
         subgraph bastionsubnet["AzureBastionSubnet 10.10.1.0/26"]
@@ -369,6 +369,12 @@ flowchart TB
         subgraph edgesubnet["EdgeSubnet 10.10.2.0/24"]
             direction TB
             agw["agw-hub-private<br/>Application Gateway WAF<br/>IP privada 10.10.2.10<br/>Hosts: intranet.northwind.lab / admin.northwind.lab"]:::hub
+        end
+
+        subgraph mgmtsubnet["ManagementSubnet 10.10.4.0/24"]
+            direction TB
+            jumpbox["jumpbox-hub-01<br/>Windows Server VM<br/>IP privada 10.10.4.10"]:::hub
+            dnsforwarder["vm-dns-forwarder-01<br/>Linux DNS Forwarder<br/>IP privada 10.10.4.50"]:::hub
         end
 
         shared["Servicios compartidos del Hub<br/>Private DNS Zones<br/>privatelink.azurewebsites.net<br/>privatelink.mysql.database.azure.com<br/>privatelink.blob.core.windows.net<br/>Key Vault: kv-intranet.privatelink.vaultcore.azure.net<br/>Azure Monitor + Log Analytics"]:::hub
@@ -388,6 +394,8 @@ flowchart TB
     shared -.->|"DNS :53/443"| spoke2
     shared -.->|"DNS+Mon :443"| spoke3
     bastion -.->|"Mgmt :443"| spoke3
+    jumpbox -.->|"Pruebas internas"| spoke1
+    dnsforwarder -.->|"Forwarding a 168.63.129.16"| shared
 
     spoke1 ~~~ spoke2
     spoke2 ~~~ spoke3
@@ -396,6 +404,7 @@ flowchart TB
     style gwsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
     style bastionsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
     style edgesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style mgmtsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
 
     classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;
     classDef legend fill:#f8fafc,stroke:#94a3b8,color:#334155;
@@ -424,13 +433,15 @@ flowchart TB
             portal["web-intranet<br/>Django + Jinja2<br/>https://intranet.northwind.lab"]:::app
             adminapp["web-admin<br/>Django Admin<br/>https://admin.northwind.lab"]:::app
             api["api-private<br/>FastAPI + Uvicorn<br/>https://api.northwind.lab"]:::app
+            adminapi["api-admin<br/>FastAPI + Uvicorn<br/>(Admin backend)"]:::app
         end
 
         subgraph pesubnet["PrivateEndpointSubnet 10.20.2.0/24"]
             direction TB
-            peportal["pe-intranet-web<br/>10.20.2.10<br/>intranet-web.privatelink.azurewebsites.net"]:::app
-            peadmin["pe-admin-web<br/>10.20.2.11<br/>admin-web.privatelink.azurewebsites.net"]:::app
-            peapi["pe-api-web<br/>10.20.2.12<br/>api-web.privatelink.azurewebsites.net"]:::app
+            peportal["pe-intranet-web<br/>10.20.2.4<br/>intranet-web.privatelink.azurewebsites.net"]:::app
+            peadmin["pe-admin-web<br/>10.20.2.5<br/>admin-web.privatelink.azurewebsites.net"]:::app
+            peapi["pe-api-web<br/>10.20.2.6<br/>api-web.privatelink.azurewebsites.net"]:::app
+            peadminapi["pe-admin-api-web<br/>10.20.2.7<br/>admin-api-web.privatelink.azurewebsites.net"]:::app
         end
     end
 
@@ -446,13 +457,15 @@ flowchart TB
     peportal -.->|"PrivLink"| portal
     peadmin -.->|"PrivLink"| adminapp
     peapi -.->|"PrivLink"| api
+    peadminapi -.->|"PrivLink"| adminapi
     portal -->|"HTTPS :443"| peapi
-    adminapp -->|"HTTPS :443"| peapi
+    adminapp -->|"HTTPS :443"| peadminapi
     api -->|"MySQL :3306"| dbapp
-    adminapp -->|"MySQL :3306"| dbadmin
+    adminapi -->|"MySQL :3306"| dbadmin
     api -->|"MySQL :3306"| dbadmin
     api -->|"HTTPS :443"| blob
     api -.->|"Secrets :443"| kv
+    adminapi -.->|"Secrets :443"| kv
     api -->|"SMTP :587"| smtp
 
     agw ~~~ kv
@@ -482,41 +495,44 @@ Source: [docs/arquitectura/spoke2-datos-detalle.mmd](docs/arquitectura/spoke2-da
 %%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 55, "rankSpacing": 72}, "themeVariables": {"fontFamily": "Trebuchet MS", "fontSize": "13px"}} }%%
 flowchart TB
     title["Diagrama 3 - Spoke 2 / Datos y documentos<br/>MySQL y Blob Storage privados"]:::title
-    legend["Leyenda<br/>Amarillo = recurso del modulo<br/>Caja gris = contenedor de red<br/>Bloque suelto = dependencia externa con color del modulo origen<br/>Rojo = servicio externo real<br/>Linea solida = trafico principal<br/>Linea punteada = private link o resolucion"]:::legend
+    legend["Leyenda<br/>Amarillo = recurso del modulo<br/>Caja gris = contenedor de red<br/>Bloque suelto = dependencia externa con color del modulo origen<br/>Rojo = servicio externo real<br/>Linea solida = trafico principal<br/>Linea punteada = VNet Integration, Private Link o resolucion"]:::legend
     title --- legend
 
     subgraph spoke2["Spoke 2 VNet 10.30.0.0/16"]
         direction LR
-        subgraph pesubnet["PrivateEndpointSubnet 10.30.1.0/24"]
+        subgraph mysqlsubnet["MySQLSubnet 10.30.1.0/24 (Delegated)"]
             direction TB
-            pemysqlapp["pe-mysql-app<br/>10.30.1.10<br/>mysql-app.privatelink.mysql.database.azure.com"]:::data
-            pemysqladmin["pe-mysql-admin<br/>10.30.1.11<br/>mysql-admin.privatelink.mysql.database.azure.com"]:::data
-            peblob["pe-blob-docs<br/>10.30.1.12<br/>stnorthwinddocs.privatelink.blob.core.windows.net"]:::data
+            mysql_app["mysql-app-db<br/>MySQL Flexible Server<br/>mysql-app.privatelink.mysql.database.azure.com"]:::data
+            mysql_admin["mysql-admin-db<br/>MySQL Flexible Server<br/>mysql-admin.privatelink.mysql.database.azure.com"]:::data
         end
 
-        dataservices["Servicios PaaS privados<br/>MySQL App DB<br/>MySQL Admin DB<br/>Storage Account / Blob"]:::data
+        subgraph pesubnet["PrivateEndpointSubnet 10.30.2.0/24"]
+            direction TB
+            peblob["pe-blob-docs<br/>stnorthwinddocs.privatelink.blob.core.windows.net"]:::data
+        end
+
+        blobdocs["Storage Account / Blob<br/>documents"]:::data
     end
 
     api["[Spoke 1] api-private"]:::app
     etl["[Spoke 3] etl-runner-01"]:::analytics
     dns["[Hub] Private DNS Zones"]:::hub
 
-    api -->|"MySQL :3306"| pemysqlapp
-    api -->|"MySQL :3306"| pemysqladmin
+    api -->|"MySQL :3306"| mysql_app
+    api -->|"MySQL :3306"| mysql_admin
     api -->|"HTTPS :443"| peblob
-    etl -->|"MySQL :3306"| pemysqlapp
-    etl -->|"MySQL :3306"| pemysqladmin
-    pemysqlapp -.->|"PrivLink"| dataservices
-    pemysqladmin -.->|"PrivLink"| dataservices
-    peblob -.->|"PrivLink"| dataservices
-    dns -.->|"DNS :53"| pemysqlapp
-    dns -.->|"DNS :53"| pemysqladmin
+    etl -->|"MySQL :3306"| mysql_app
+    etl -->|"MySQL :3306"| mysql_admin
+    peblob -.->|"Private Link"| blobdocs
+    dns -.->|"DNS :53"| mysql_app
+    dns -.->|"DNS :53"| mysql_admin
     dns -.->|"DNS :53"| peblob
 
     api ~~~ etl
     etl ~~~ dns
 
     style spoke2 fill:#f8fafc,stroke:#b28704,stroke-width:2px;
+    style mysqlsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
     style pesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
 
     classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;
@@ -536,7 +552,7 @@ Source: [docs/arquitectura/spoke3-analitica-detalle.mmd](docs/arquitectura/spoke
 %%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 55, "rankSpacing": 72}, "themeVariables": {"fontFamily": "Trebuchet MS", "fontSize": "13px"}} }%%
 flowchart TB
     title["Diagrama 4 - Spoke 3 / Analitica<br/>ETL y dashboard interno"]:::title
-    legend["Leyenda<br/>Morado = recurso del modulo<br/>Caja gris = contenedor de red<br/>Bloque suelto = dependencia externa con color del modulo origen<br/>Rojo = servicio externo real<br/>Linea solida = trafico principal<br/>Linea punteada = observabilidad o gestion"]:::legend
+    legend["Leyenda<br/>Morado = recurso del modulo<br/>Caja gris = contenedor de red<br/>Bloque suelto = dependencia externa con color del modulo origen<br/>Rojo = servicio externo real<br/>Linea solida = trafico principal<br/>Linea punteada = VNet Integration, observabilidad o gestion"]:::legend
     title --- legend
 
     subgraph spoke3["Spoke 3 VNet 10.40.0.0/16"]
@@ -551,12 +567,10 @@ flowchart TB
             dashboard["dashboard-kpi-01<br/>Streamlit<br/>10.40.2.20<br/>https://kpi.northwind.lab"]:::analytics
         end
 
-        subgraph pesubnet["PrivateEndpointSubnet 10.40.3.0/24"]
+        subgraph mysqlsubnet["MySQLSubnet 10.40.3.0/24 (Delegated)"]
             direction TB
-            peanalytics["pe-mysql-analytics<br/>10.40.3.10<br/>mysql-analytics.privatelink.mysql.database.azure.com"]:::analytics
+            mysqlanalytics["mysql-analytics-db<br/>MySQL Flexible Server<br/>mysql-analytics.privatelink.mysql.database.azure.com"]:::analytics
         end
-
-        analyticsdb["MySQL Analytics DB<br/>mysql-analytics.privatelink.mysql.database.azure.com"]:::analytics
     end
 
     dbapp["[Spoke 2] mysql-app-db"]:::data
@@ -567,14 +581,13 @@ flowchart TB
 
     etl -->|"MySQL :3306"| dbapp
     etl -->|"MySQL :3306"| dbadmin
-    etl -->|"MySQL :3306"| peanalytics
-    peanalytics -.->|"PrivLink"| analyticsdb
-    dashboard -->|"MySQL :3306"| peanalytics
-    vpnusers -->|"HTTPS :443"| dashboard
+    etl -->|"MySQL :3306"| mysqlanalytics
+    dashboard -->|"MySQL :3306"| mysqlanalytics
+    vpnusers -->|"HTTPS :8501"| dashboard
     etl -.->|"Logs :443"| monitor
     dashboard -.->|"Logs :443"| monitor
-    bastion -.->|"Mgmt :443"| etl
-    bastion -.->|"Mgmt :443"| dashboard
+    bastion -.->|"Mgmt :22/8501"| etl
+    bastion -.->|"Mgmt :22/8501"| dashboard
 
     dbapp ~~~ dbadmin
     dbadmin ~~~ vpnusers
@@ -584,7 +597,7 @@ flowchart TB
     style spoke3 fill:#f8fafc,stroke:#8e24aa,stroke-width:2px;
     style etlsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
     style dashboardsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
-    style pesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style mysqlsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
 
     classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;
     classDef legend fill:#f8fafc,stroke:#94a3b8,color:#334155;
