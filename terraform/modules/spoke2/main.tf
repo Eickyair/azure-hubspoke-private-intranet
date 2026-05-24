@@ -120,6 +120,8 @@ resource "azurerm_virtual_network_peering" "spoke_to_hub" {
   allow_virtual_network_access = true
   allow_forwarded_traffic      = true
   use_remote_gateways          = var.use_remote_gateways
+
+  depends_on = [azurerm_virtual_network_peering.hub_to_spoke]
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "mysql" {

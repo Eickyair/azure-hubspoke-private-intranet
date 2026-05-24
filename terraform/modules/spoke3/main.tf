@@ -54,6 +54,8 @@ resource "azurerm_virtual_network_peering" "spoke_to_hub" {
   allow_virtual_network_access = true
   allow_forwarded_traffic      = true
   use_remote_gateways          = var.use_remote_gateways
+
+  depends_on = [azurerm_virtual_network_peering.hub_to_spoke]
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "mysql" {
@@ -176,6 +178,18 @@ resource "azurerm_network_security_group" "dashboard" {
     source_port_range          = "*"
     destination_port_range     = "22"
     source_address_prefix      = var.hub_bastion_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowVpnClientsStreamlit"
+    priority                   = 130
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_ranges    = ["22", "8501"]
+    source_address_prefixes    = length(var.vpn_client_address_prefixes) > 0 ? var.vpn_client_address_prefixes : ["172.16.10.0/24"]
     destination_address_prefix = "*"
   }
 
