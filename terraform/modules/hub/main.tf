@@ -8,7 +8,7 @@ locals {
 
   application_gateway_backends = var.application_gateway.enabled ? var.application_gateway.backends : {}
 
-  key_vault_name = substr(lower("kv${replace(var.name_prefix, "-", "")}${substr(md5(var.resource_group_name), 0, 6)}"), 0, 24)
+  key_vault_name = substr(lower("kv${replace(var.name_prefix, "-", "")}${random_string.kv_suffix.result}"), 0, 24)
 
   jumpbox_bootstrap_script_b64 = base64encode(templatefile("${path.module}/jumpbox-init.ps1.tftpl", {
     intranet_url        = var.internal_urls.intranet
@@ -16,7 +16,14 @@ locals {
     api_url             = var.internal_urls.api
     analytics_url       = var.internal_urls.analytics
     resource_group_name = var.resource_group_name
+    root_ca_cert_b64    = filebase64("${path.module}/../../.vpn-certs/ca.crt")
   }))
+}
+
+resource "random_string" "kv_suffix" {
+  length  = 6
+  special = false
+  upper   = false
 }
 
 resource "azurerm_virtual_network" "hub" {
@@ -130,10 +137,42 @@ resource "azurerm_key_vault" "main" {
   tenant_id                     = var.tenant_id
   sku_name                      = "standard"
   enable_rbac_authorization     = true
-  public_network_access_enabled = false
+  public_network_access_enabled = true
   soft_delete_retention_days    = 7
   purge_protection_enabled      = true
   tags                          = var.tags
+}
+
+data "azurerm_client_config" "current" {}
+
+resource "azurerm_user_assigned_identity" "appgw" {
+  name                = "id-${var.name_prefix}-appgw"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+}
+
+resource "azurerm_role_assignment" "appgw_kv_secrets_user" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.appgw.principal_id
+}
+
+resource "azurerm_role_assignment" "deployer_kv_secrets_officer" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
+resource "azurerm_key_vault_secret" "appgw_cert" {
+  name         = "cert-northwind-lab"
+  value        = filebase64("${path.module}/../../.vpn-certs/cert-northwind-lab.pfx")
+  key_vault_id = azurerm_key_vault.main.id
+  content_type = "application/x-pkcs12"
+
+  depends_on = [
+    azurerm_role_assignment.deployer_kv_secrets_officer
+  ]
 }
 
 resource "azurerm_private_endpoint" "key_vault" {
@@ -372,7 +411,10 @@ resource "azurerm_application_gateway" "main" {
   firewall_policy_id  = azurerm_web_application_firewall_policy.main[0].id
   tags                = var.tags
 
-  depends_on = [azurerm_subnet.management]
+  depends_on = [
+    azurerm_subnet.management,
+    azurerm_role_assignment.appgw_kv_secrets_user
+  ]
 
   sku {
     name     = "WAF_v2"
@@ -407,11 +449,27 @@ resource "azurerm_application_gateway" "main" {
     port = 80
   }
 
+  frontend_port {
+    name = "port-443"
+    port = 443
+  }
+
+  ssl_certificate {
+    name                = "cert-northwind-lab"
+    key_vault_secret_id = azurerm_key_vault_secret.appgw_cert.versionless_id
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.appgw.id]
+  }
+
   dynamic "backend_address_pool" {
     for_each = local.application_gateway_backends
     content {
-      name  = "be-${backend_address_pool.key}"
-      fqdns = [backend_address_pool.value.backend_fqdn]
+      name         = "be-${backend_address_pool.key}"
+      fqdns        = length(backend_address_pool.value.backend_fqdns) > 0 ? backend_address_pool.value.backend_fqdns : null
+      ip_addresses = length(backend_address_pool.value.backend_ip_addresses) > 0 ? backend_address_pool.value.backend_ip_addresses : null
     }
   }
 
@@ -419,12 +477,13 @@ resource "azurerm_application_gateway" "main" {
     for_each = local.application_gateway_backends
     content {
       name                                      = "probe-${probe.key}"
-      protocol                                  = "Https"
-      path                                      = "/live"
+      protocol                                  = probe.value.backend_protocol
+      path                                      = probe.value.probe_path
       interval                                  = 30
       timeout                                   = 30
       unhealthy_threshold                       = 3
-      pick_host_name_from_backend_http_settings = true
+      host                                      = probe.value.pick_host_name_from_backend_http_settings ? null : probe.value.host_name
+      pick_host_name_from_backend_http_settings = probe.value.pick_host_name_from_backend_http_settings
     }
   }
 
@@ -433,18 +492,20 @@ resource "azurerm_application_gateway" "main" {
     content {
       name                                = "bhs-${backend_http_settings.key}"
       cookie_based_affinity               = "Disabled"
-      port                                = 443
-      protocol                            = "Https"
+      port                                = backend_http_settings.value.backend_port
+      protocol                            = backend_http_settings.value.backend_protocol
       request_timeout                     = 30
-      pick_host_name_from_backend_address = true
+      host_name                           = backend_http_settings.value.pick_host_name_from_backend_address ? null : backend_http_settings.value.host_name
+      pick_host_name_from_backend_address = backend_http_settings.value.pick_host_name_from_backend_address
       probe_name                          = "probe-${backend_http_settings.key}"
     }
   }
 
+  # Listeners HTTP (Puerto 80) para redireccionamiento
   dynamic "http_listener" {
     for_each = local.application_gateway_backends
     content {
-      name                           = "lst-${http_listener.key}"
+      name                           = "lst-http-${http_listener.key}"
       frontend_ip_configuration_name = "private-frontend"
       frontend_port_name             = "port-80"
       protocol                       = "Http"
@@ -452,13 +513,50 @@ resource "azurerm_application_gateway" "main" {
     }
   }
 
+  # Listeners HTTPS (Puerto 443) con SSL
+  dynamic "http_listener" {
+    for_each = local.application_gateway_backends
+    content {
+      name                           = "lst-https-${http_listener.key}"
+      frontend_ip_configuration_name = "private-frontend"
+      frontend_port_name             = "port-443"
+      protocol                       = "Https"
+      host_name                      = http_listener.value.host_name
+      ssl_certificate_name           = "cert-northwind-lab"
+    }
+  }
+
+  dynamic "redirect_configuration" {
+    for_each = local.application_gateway_backends
+    content {
+      name                 = "redir-${redirect_configuration.key}"
+      redirect_type        = "Permanent"
+      target_listener_name = "lst-https-${redirect_configuration.key}"
+      include_path         = true
+      include_query_string = true
+    }
+  }
+
+  # Reglas HTTP: Redireccionan a HTTPS
   dynamic "request_routing_rule" {
     for_each = local.application_gateway_backends
     content {
-      name                       = "rule-${request_routing_rule.key}"
-      priority                   = request_routing_rule.value.priority
+      name                        = "rule-http-${request_routing_rule.key}"
+      priority                    = request_routing_rule.value.priority
+      rule_type                   = "Basic"
+      http_listener_name          = "lst-http-${request_routing_rule.key}"
+      redirect_configuration_name = "redir-${request_routing_rule.key}"
+    }
+  }
+
+  # Reglas HTTPS: Enrutan al Backend Pool
+  dynamic "request_routing_rule" {
+    for_each = local.application_gateway_backends
+    content {
+      name                       = "rule-https-${request_routing_rule.key}"
+      priority                   = request_routing_rule.value.priority + 1000
       rule_type                  = "Basic"
-      http_listener_name         = "lst-${request_routing_rule.key}"
+      http_listener_name         = "lst-https-${request_routing_rule.key}"
       backend_address_pool_name  = "be-${request_routing_rule.key}"
       backend_http_settings_name = "bhs-${request_routing_rule.key}"
     }

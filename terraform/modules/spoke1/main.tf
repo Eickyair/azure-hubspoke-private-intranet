@@ -486,13 +486,13 @@ resource "azurerm_linux_web_app" "api" {
     MYSQL_APP_HOST                      = var.app_environment.mysql_app_host
     MYSQL_APP_DATABASE                  = var.app_environment.mysql_app_database
     MYSQL_APP_USER                      = var.app_environment.mysql_user
-    MYSQL_APP_PASSWORD                  = var.app_environment.mysql_password
+    MYSQL_APP_PASSWORD                  = "@Microsoft.KeyVault(VaultName=${var.key_vault_name};SecretName=mysql-administrator-password)"
     MYSQL_ADMIN_HOST                    = var.app_environment.mysql_admin_host
     MYSQL_ADMIN_DATABASE                = var.app_environment.mysql_admin_database
     MYSQL_ADMIN_USER                    = var.app_environment.mysql_user
-    MYSQL_ADMIN_PASSWORD                = var.app_environment.mysql_password
+    MYSQL_ADMIN_PASSWORD                = "@Microsoft.KeyVault(VaultName=${var.key_vault_name};SecretName=mysql-administrator-password)"
     STORAGE_ACCOUNT_URL                 = var.app_environment.storage_account_url
-    STORAGE_ACCOUNT_KEY                 = var.app_environment.storage_account_key
+    STORAGE_ACCOUNT_KEY                 = "@Microsoft.KeyVault(VaultName=${var.key_vault_name};SecretName=storage-primary-access-key)"
     STORAGE_CONTAINER_NAME              = var.app_environment.storage_container
     APP_PACKAGE_HASH                    = local.package_hashes.api
     WEBSITE_RUN_FROM_PACKAGE            = local.prebuilt_package_urls.api
@@ -537,9 +537,9 @@ resource "azurerm_linux_web_app" "admin_api" {
     MYSQL_APP_HOST                      = var.app_environment.mysql_admin_host
     MYSQL_APP_DATABASE                  = var.app_environment.mysql_admin_database
     MYSQL_APP_USER                      = var.app_environment.mysql_user
-    MYSQL_APP_PASSWORD                  = var.app_environment.mysql_password
+    MYSQL_APP_PASSWORD                  = "@Microsoft.KeyVault(VaultName=${var.key_vault_name};SecretName=mysql-administrator-password)"
     STORAGE_ACCOUNT_URL                 = var.app_environment.storage_account_url
-    STORAGE_ACCOUNT_KEY                 = var.app_environment.storage_account_key
+    STORAGE_ACCOUNT_KEY                 = "@Microsoft.KeyVault(VaultName=${var.key_vault_name};SecretName=storage-primary-access-key)"
     STORAGE_CONTAINER_NAME              = var.app_environment.storage_container
     APP_PACKAGE_HASH                    = local.package_hashes.admin_api
     WEBSITE_RUN_FROM_PACKAGE            = local.prebuilt_package_urls.admin_api
@@ -658,4 +658,28 @@ resource "azurerm_private_endpoint" "admin_api" {
   }
 
   depends_on = [azurerm_private_endpoint.api]
+}
+
+resource "azurerm_role_assignment" "webapp_kv_secrets_user" {
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_web_app.webapp.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "admin_kv_secrets_user" {
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_web_app.admin.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "api_kv_secrets_user" {
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_web_app.api.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "admin_api_kv_secrets_user" {
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_web_app.admin_api.identity[0].principal_id
 }

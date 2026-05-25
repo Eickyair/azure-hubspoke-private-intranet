@@ -2,6 +2,16 @@ variable "resource_group_name" {
   type = string
 }
 
+variable "key_vault_id" {
+  type        = string
+  description = "ID del Key Vault en el Hub para asignar permisos de lectura a las identidades."
+}
+
+variable "key_vault_name" {
+  type        = string
+  description = "Nombre del Key Vault para construir las referencias de secreto."
+}
+
 variable "location" {
   type = string
 }

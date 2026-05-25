@@ -143,10 +143,22 @@ resource "azurerm_network_security_group" "dashboard" {
   resource_group_name = var.resource_group_name
   tags                = var.tags
 
+  security_rule {
+    name                       = "AllowAppGatewayStreamlit"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "8501"
+    source_address_prefix      = var.hub_edge_subnet_prefix
+    destination_address_prefix = "*"
+  }
+
   # Solo el Jumpbox accede al dashboard Streamlit por DNS privado
   security_rule {
     name                       = "AllowJumpboxStreamlit"
-    priority                   = 100
+    priority                   = 105
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
@@ -159,7 +171,7 @@ resource "azurerm_network_security_group" "dashboard" {
   # SSH desde Azure Bastion y Jumpbox de validacion
   security_rule {
     name                       = "AllowJumpboxSsh"
-    priority                   = 105
+    priority                   = 110
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
@@ -171,7 +183,7 @@ resource "azurerm_network_security_group" "dashboard" {
 
   security_rule {
     name                       = "AllowBastionSsh"
-    priority                   = 110
+    priority                   = 120
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"

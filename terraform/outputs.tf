@@ -39,10 +39,10 @@ output "spoke3_private_ips" {
 output "internal_urls" {
   description = "URLs internas previstas para la demo por VPN."
   value = {
-    intranet  = "http://${var.internal_domains.intranet}"
-    admin     = "http://${var.internal_domains.admin}"
-    api       = "http://${var.internal_domains.api}/health"
-    analytics = "http://${var.internal_domains.analytics}:8501"
+    intranet  = "https://${var.internal_domains.intranet}"
+    admin     = "https://${var.internal_domains.admin}"
+    api       = "https://${var.internal_domains.api}/health"
+    analytics = "https://${var.internal_domains.analytics}"
   }
 }
 

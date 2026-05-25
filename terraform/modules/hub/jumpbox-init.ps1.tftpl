@@ -3,6 +3,24 @@ $ErrorActionPreference = 'Stop'
 $desktopPath = 'C:\Users\Public\Desktop'
 New-Item -ItemType Directory -Force -Path $desktopPath | Out-Null
 
+$certDir = 'C:\ProgramData\Northwind\certs'
+$rootCaPath = Join-Path $certDir 'northwind-root-ca.crt'
+New-Item -ItemType Directory -Force -Path $certDir | Out-Null
+
+try {
+    [IO.File]::WriteAllBytes($rootCaPath, [Convert]::FromBase64String('${root_ca_cert_b64}'))
+    $cert = Import-Certificate -FilePath $rootCaPath -CertStoreLocation 'Cert:\LocalMachine\Root'
+    if ($cert) {
+        $rootCaStatus = "CA interna instalada en LocalMachine\\Root: $($cert.Thumbprint)"
+    }
+    else {
+        $rootCaStatus = 'CA interna ya estaba instalada o no devolvio thumbprint.'
+    }
+}
+catch {
+    $rootCaStatus = 'No se pudo instalar la CA interna: ' + $_.Exception.Message
+}
+
 $validationNotes = @(
     'Validacion manual - Private Intranet',
     '',
@@ -11,6 +29,10 @@ $validationNotes = @(
     'ADMIN: ${admin_url}',
     'API: ${api_url}',
     'ANALYTICS: ${analytics_url}',
+    '',
+    'Certificado HTTPS:',
+    $rootCaStatus,
+    "CA local: $rootCaPath",
     '',
     'Pruebas rapidas en PowerShell:',
     'Resolve-DnsName api.northwind.lab',

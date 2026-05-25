@@ -65,9 +65,15 @@ variable "application_gateway" {
     enabled            = bool
     private_ip_address = string
     backends = map(object({
-      host_name    = string
-      backend_fqdn = string
-      priority     = number
+      host_name                                 = string
+      backend_fqdns                             = list(string)
+      backend_ip_addresses                      = list(string)
+      priority                                  = number
+      backend_protocol                          = string
+      backend_port                              = number
+      probe_path                                = string
+      pick_host_name_from_backend_http_settings = bool
+      pick_host_name_from_backend_address       = bool
     }))
   })
 }
