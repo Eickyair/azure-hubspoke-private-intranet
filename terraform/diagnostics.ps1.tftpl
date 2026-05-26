@@ -7,6 +7,7 @@
 $ErrorActionPreference = 'Continue'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = [System.Net.Security.RemoteCertificateValidationCallback]{ $true }
 
 $DiagDir   = 'C:\diag'
 $Timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -19,6 +20,7 @@ New-Item -ItemType Directory -Force -Path $DiagDir | Out-Null
 $UrlIntranet        = '${intranet_url}'
 $UrlAdmin           = '${admin_url}'
 $UrlApi             = '${api_url}'
+$UrlAnalytics       = '${analytics_url}'
 $DnsIntranet        = '${dns_intranet}'
 $DnsAdmin           = '${dns_admin}'
 $DnsApi             = '${dns_api}'
@@ -252,14 +254,21 @@ function Get-MySQLClient {
 function Test-Http {
     param([string]$Url, [int]$TimeoutSec = 15)
     try {
-        $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
-        $body = if ($r.Content.Length -gt 0) { $r.Content.Substring(0, [Math]::Min(300, $r.Content.Length)).Trim() } else { '' }
-        return [pscustomobject]@{ Ok = $true;  Code = $r.StatusCode; Body = $body }
-    } catch [System.Net.WebException] {
-        $code = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
-        return [pscustomobject]@{ Ok = $false; Code = $code; Body = $_.Exception.Message }
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler.ServerCertificateCustomValidationCallback = { $true }
+        $client = New-Object System.Net.Http.HttpClient($handler)
+        $client.Timeout = [System.TimeSpan]::FromSeconds($TimeoutSec)
+        $response = $client.GetAsync($Url).Result
+        $body = ''
+        if ($response.Content) {
+            $body = $response.Content.ReadAsStringAsync().Result
+            if ($body.Length -gt 300) { $body = $body.Substring(0, 300).Trim() }
+        }
+        return [pscustomobject]@{ Ok = $response.IsSuccessStatusCode; Code = [int]$response.StatusCode; Body = $body }
     } catch {
-        return [pscustomobject]@{ Ok = $false; Code = 0; Body = $_.Exception.Message }
+        $inner = $_.Exception
+        while ($inner.InnerException) { $inner = $inner.InnerException }
+        return [pscustomobject]@{ Ok = $false; Code = 0; Body = $inner.Message }
     }
 }
 
@@ -282,17 +291,23 @@ function Test-BlobEndpoint {
     param([string]$BaseEndpoint)
     $uri = "$BaseEndpoint/?comp=list"
     try {
-        $r = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
-        return [pscustomobject]@{ Ok = $true; Detail = "HTTP $($r.StatusCode) - acceso anonimo (inesperado)" }
-    } catch [System.Net.WebException] {
-        $code = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
-        # 400/401/403/409 = endpoint alcanzable pero rechaza peticion no autenticada (comportamiento CORRECTO)
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler.ServerCertificateCustomValidationCallback = { $true }
+        $client = New-Object System.Net.Http.HttpClient($handler)
+        $client.Timeout = [System.TimeSpan]::FromSeconds(10)
+        $response = $client.GetAsync($uri).Result
+        $code = [int]$response.StatusCode
         if ($code -in @(400, 401, 403, 409)) {
             return [pscustomobject]@{ Ok = $true; Detail = "HTTP $code - endpoint alcanzable, autenticacion requerida (red CORRECTA)" }
         }
-        return [pscustomobject]@{ Ok = $false; Detail = "HTTP $code - $($_.Exception.Message)" }
+        if ($response.IsSuccessStatusCode) {
+            return [pscustomobject]@{ Ok = $true; Detail = "HTTP $code - acceso anonimo (inesperado)" }
+        }
+        return [pscustomobject]@{ Ok = $false; Detail = "HTTP $code - $($response.ReasonPhrase)" }
     } catch {
-        return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message }
+        $inner = $_.Exception
+        while ($inner.InnerException) { $inner = $inner.InnerException }
+        return [pscustomobject]@{ Ok = $false; Detail = $inner.Message }
     }
 }
 
@@ -317,7 +332,7 @@ $dnsTests = @(
     @{ Name = $DnsIntranet;        Expected = $AppGwIp;    Label = "intranet.northwind.lab  ->  App Gateway ($AppGwIp)" }
     @{ Name = $DnsAdmin;           Expected = $AppGwIp;    Label = "admin.northwind.lab     ->  App Gateway ($AppGwIp)" }
     @{ Name = $DnsApi;             Expected = $AppGwIp;    Label = "api.northwind.lab       ->  App Gateway ($AppGwIp)" }
-    @{ Name = $DnsAnalytics;       Expected = $DashboardIp;Label = "kpi.northwind.lab       ->  Dashboard VM ($DashboardIp)" }
+    @{ Name = $DnsAnalytics;       Expected = $AppGwIp;    Label = "kpi.northwind.lab       ->  App Gateway ($AppGwIp)" }
     @{ Name = $MysqlAppHost;       Expected = '';          Label = "MySQL app               ->  $MysqlAppHost" }
     @{ Name = $MysqlAdminHost;     Expected = '';          Label = "MySQL admin             ->  $MysqlAdminHost" }
     @{ Name = $MysqlAnalyticsHost; Expected = '';          Label = "MySQL analytics         ->  $MysqlAnalyticsHost" }
@@ -334,9 +349,9 @@ foreach ($t in $dnsTests) {
 }
 
 # -----------------------------------------------------------------
-# SECCION 2 - HTTP HEALTH CHECKS (App Services via App Gateway)
+# SECCION 2 - HTTPS HEALTH CHECKS (App Services via App Gateway)
 # -----------------------------------------------------------------
-Write-Section '2. HTTP HEALTH CHECKS - App Services (via App Gateway interno)'
+Write-Section '2. HTTPS HEALTH CHECKS - App Services (via App Gateway interno)'
 
 # /live = health check de App Service; /health = endpoint de la API
 $httpEndpoints = @(
@@ -356,12 +371,12 @@ foreach ($t in $httpEndpoints) {
     }
 }
 
-# Dashboard Streamlit via IP directa (spoke3, no pasa por App Gateway)
-$rDash = Test-Http -Url "http://$DashboardIp`:8501"
+# Dashboard Streamlit via host interno seguro
+$rDash = Test-Http -Url $UrlAnalytics
 if ($rDash.Ok) {
-    Write-Check -Name 'Dashboard Streamlit :8501 (IP directa)' -Status 'PASS' -Detail "HTTP $($rDash.Code)"
+    Write-Check -Name 'Dashboard Streamlit / (via App Gateway interno)' -Status 'PASS' -Detail "HTTP $($rDash.Code)"
 } else {
-    Write-Check -Name 'Dashboard Streamlit :8501 (IP directa)' -Status 'FAIL' -Detail "HTTP $($rDash.Code) | $($rDash.Body)"
+    Write-Check -Name 'Dashboard Streamlit / (via App Gateway interno)' -Status 'FAIL' -Detail "HTTP $($rDash.Code) | $($rDash.Body)"
 }
 
 # ETL FastAPI via IP directa
@@ -485,21 +500,21 @@ foreach ($vm in $vms) {
 # -----------------------------------------------------------------
 # SECCION 6 - HUB: App Gateway
 # -----------------------------------------------------------------
-Write-Section '6. HUB - App Gateway interno TCP:80'
+Write-Section '6. HUB - App Gateway interno TCP:443'
 
-$tcpAgw = Test-TcpPort -HostName $AppGwIp -Port 80
+$tcpAgw = Test-TcpPort -HostName $AppGwIp -Port 443
 if ($tcpAgw) {
-    Write-Check -Name "App Gateway TCP:80 ($AppGwIp)" -Status 'PASS' -Detail 'Listener HTTP alcanzable desde jumpbox'
+    Write-Check -Name "App Gateway TCP:443 ($AppGwIp)" -Status 'PASS' -Detail 'Listener HTTPS alcanzable desde jumpbox'
 } else {
-    Write-Check -Name "App Gateway TCP:80 ($AppGwIp)" -Status 'FAIL' -Detail 'No alcanzable en TCP:80'
+    Write-Check -Name "App Gateway TCP:443 ($AppGwIp)" -Status 'FAIL' -Detail 'No alcanzable en TCP:443'
 }
 
-# Test HTTP completo a traves de App Gateway
-$agwHttp = Test-Http -Url "http://$AppGwIp/" -TimeoutSec 10
+# Test HTTPS completo a traves de App Gateway usando host interno
+$agwHttp = Test-Http -Url $UrlIntranet -TimeoutSec 10
 if ($agwHttp.Ok) {
-    Write-Check -Name "App Gateway HTTP GET /" -Status 'PASS' -Detail "HTTP $($agwHttp.Code)"
+    Write-Check -Name "App Gateway HTTPS GET intranet" -Status 'PASS' -Detail "HTTP $($agwHttp.Code)"
 } else {
-    Write-Check -Name "App Gateway HTTP GET /" -Status 'WARN' -Detail "HTTP $($agwHttp.Code) | $($agwHttp.Body)"
+    Write-Check -Name "App Gateway HTTPS GET intranet" -Status 'WARN' -Detail "HTTP $($agwHttp.Code) | $($agwHttp.Body)"
 }
 
 # -----------------------------------------------------------------

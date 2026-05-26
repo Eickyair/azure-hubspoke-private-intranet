@@ -8,7 +8,7 @@ locals {
 
   application_gateway_backends = var.application_gateway.enabled ? var.application_gateway.backends : {}
 
-  key_vault_name = substr(lower("kv${replace(var.name_prefix, "-", "")}${substr(md5(var.resource_group_name), 0, 6)}"), 0, 24)
+  key_vault_name = substr(lower("kv${replace(var.name_prefix, "-", "")}${random_string.kv_suffix.result}"), 0, 24)
 
   jumpbox_bootstrap_script_b64 = base64encode(templatefile("${path.module}/jumpbox-init.ps1.tftpl", {
     intranet_url        = var.internal_urls.intranet
@@ -16,7 +16,14 @@ locals {
     api_url             = var.internal_urls.api
     analytics_url       = var.internal_urls.analytics
     resource_group_name = var.resource_group_name
+    root_ca_cert_b64    = filebase64("${path.module}/../../.vpn-certs/ca.crt")
   }))
+}
+
+resource "random_string" "kv_suffix" {
+  length  = 6
+  special = false
+  upper   = false
 }
 
 resource "azurerm_virtual_network" "hub" {
@@ -25,6 +32,7 @@ resource "azurerm_virtual_network" "hub" {
   resource_group_name = var.resource_group_name
   address_space       = var.config.address_space
   tags                = var.tags
+  dns_servers         = var.config.enable_vpn_gateway ? ["10.10.4.50"] : null
 }
 
 resource "azurerm_subnet" "gateway" {
@@ -129,10 +137,42 @@ resource "azurerm_key_vault" "main" {
   tenant_id                     = var.tenant_id
   sku_name                      = "standard"
   enable_rbac_authorization     = true
-  public_network_access_enabled = false
+  public_network_access_enabled = true
   soft_delete_retention_days    = 7
   purge_protection_enabled      = true
   tags                          = var.tags
+}
+
+data "azurerm_client_config" "current" {}
+
+resource "azurerm_user_assigned_identity" "appgw" {
+  name                = "id-${var.name_prefix}-appgw"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+}
+
+resource "azurerm_role_assignment" "appgw_kv_secrets_user" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.appgw.principal_id
+}
+
+resource "azurerm_role_assignment" "deployer_kv_secrets_officer" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
+resource "azurerm_key_vault_secret" "appgw_cert" {
+  name         = "cert-northwind-lab"
+  value        = filebase64("${path.module}/../../.vpn-certs/cert-northwind-lab.pfx")
+  key_vault_id = azurerm_key_vault.main.id
+  content_type = "application/x-pkcs12"
+
+  depends_on = [
+    azurerm_role_assignment.deployer_kv_secrets_officer
+  ]
 }
 
 resource "azurerm_private_endpoint" "key_vault" {
@@ -292,6 +332,7 @@ resource "azurerm_public_ip" "vpn" {
   resource_group_name = var.resource_group_name
   allocation_method   = "Static"
   sku                 = "Standard"
+  zones               = ["1", "2", "3"]
   tags                = var.tags
 }
 
@@ -304,7 +345,7 @@ resource "azurerm_virtual_network_gateway" "vpn" {
   vpn_type            = "RouteBased"
   active_active       = false
   enable_bgp          = false
-  sku                 = "VpnGw1"
+  sku                 = "VpnGw1AZ"
   generation          = "Generation1"
   tags                = var.tags
 
@@ -370,7 +411,10 @@ resource "azurerm_application_gateway" "main" {
   firewall_policy_id  = azurerm_web_application_firewall_policy.main[0].id
   tags                = var.tags
 
-  depends_on = [azurerm_subnet.management]
+  depends_on = [
+    azurerm_subnet.management,
+    azurerm_role_assignment.appgw_kv_secrets_user
+  ]
 
   sku {
     name     = "WAF_v2"
@@ -405,11 +449,27 @@ resource "azurerm_application_gateway" "main" {
     port = 80
   }
 
+  frontend_port {
+    name = "port-443"
+    port = 443
+  }
+
+  ssl_certificate {
+    name                = "cert-northwind-lab"
+    key_vault_secret_id = azurerm_key_vault_secret.appgw_cert.versionless_id
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.appgw.id]
+  }
+
   dynamic "backend_address_pool" {
     for_each = local.application_gateway_backends
     content {
-      name  = "be-${backend_address_pool.key}"
-      fqdns = [backend_address_pool.value.backend_fqdn]
+      name         = "be-${backend_address_pool.key}"
+      fqdns        = length(backend_address_pool.value.backend_fqdns) > 0 ? backend_address_pool.value.backend_fqdns : null
+      ip_addresses = length(backend_address_pool.value.backend_ip_addresses) > 0 ? backend_address_pool.value.backend_ip_addresses : null
     }
   }
 
@@ -417,12 +477,13 @@ resource "azurerm_application_gateway" "main" {
     for_each = local.application_gateway_backends
     content {
       name                                      = "probe-${probe.key}"
-      protocol                                  = "Https"
-      path                                      = "/live"
+      protocol                                  = probe.value.backend_protocol
+      path                                      = probe.value.probe_path
       interval                                  = 30
       timeout                                   = 30
       unhealthy_threshold                       = 3
-      pick_host_name_from_backend_http_settings = true
+      host                                      = probe.value.pick_host_name_from_backend_http_settings ? null : probe.value.host_name
+      pick_host_name_from_backend_http_settings = probe.value.pick_host_name_from_backend_http_settings
     }
   }
 
@@ -431,18 +492,20 @@ resource "azurerm_application_gateway" "main" {
     content {
       name                                = "bhs-${backend_http_settings.key}"
       cookie_based_affinity               = "Disabled"
-      port                                = 443
-      protocol                            = "Https"
+      port                                = backend_http_settings.value.backend_port
+      protocol                            = backend_http_settings.value.backend_protocol
       request_timeout                     = 30
-      pick_host_name_from_backend_address = true
+      host_name                           = backend_http_settings.value.pick_host_name_from_backend_address ? null : backend_http_settings.value.host_name
+      pick_host_name_from_backend_address = backend_http_settings.value.pick_host_name_from_backend_address
       probe_name                          = "probe-${backend_http_settings.key}"
     }
   }
 
+  # Listeners HTTP (Puerto 80) para redireccionamiento
   dynamic "http_listener" {
     for_each = local.application_gateway_backends
     content {
-      name                           = "lst-${http_listener.key}"
+      name                           = "lst-http-${http_listener.key}"
       frontend_ip_configuration_name = "private-frontend"
       frontend_port_name             = "port-80"
       protocol                       = "Http"
@@ -450,15 +513,188 @@ resource "azurerm_application_gateway" "main" {
     }
   }
 
+  # Listeners HTTPS (Puerto 443) con SSL
+  dynamic "http_listener" {
+    for_each = local.application_gateway_backends
+    content {
+      name                           = "lst-https-${http_listener.key}"
+      frontend_ip_configuration_name = "private-frontend"
+      frontend_port_name             = "port-443"
+      protocol                       = "Https"
+      host_name                      = http_listener.value.host_name
+      ssl_certificate_name           = "cert-northwind-lab"
+    }
+  }
+
+  dynamic "redirect_configuration" {
+    for_each = local.application_gateway_backends
+    content {
+      name                 = "redir-${redirect_configuration.key}"
+      redirect_type        = "Permanent"
+      target_listener_name = "lst-https-${redirect_configuration.key}"
+      include_path         = true
+      include_query_string = true
+    }
+  }
+
+  # Reglas HTTP: Redireccionan a HTTPS
   dynamic "request_routing_rule" {
     for_each = local.application_gateway_backends
     content {
-      name                       = "rule-${request_routing_rule.key}"
-      priority                   = request_routing_rule.value.priority
+      name                        = "rule-http-${request_routing_rule.key}"
+      priority                    = request_routing_rule.value.priority
+      rule_type                   = "Basic"
+      http_listener_name          = "lst-http-${request_routing_rule.key}"
+      redirect_configuration_name = "redir-${request_routing_rule.key}"
+    }
+  }
+
+  # Reglas HTTPS: Enrutan al Backend Pool
+  dynamic "request_routing_rule" {
+    for_each = local.application_gateway_backends
+    content {
+      name                       = "rule-https-${request_routing_rule.key}"
+      priority                   = request_routing_rule.value.priority + 1000
       rule_type                  = "Basic"
-      http_listener_name         = "lst-${request_routing_rule.key}"
+      http_listener_name         = "lst-https-${request_routing_rule.key}"
       backend_address_pool_name  = "be-${request_routing_rule.key}"
       backend_http_settings_name = "bhs-${request_routing_rule.key}"
     }
   }
+}
+
+# ── DNS Forwarder Virtual Machine ───────────────────────────────────
+
+resource "azurerm_network_interface" "dns" {
+  count               = var.config.enable_vpn_gateway ? 1 : 0
+  name                = "nic-${var.name_prefix}-dns-forwarder"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  ip_configuration {
+    name                          = "ipconfig1"
+    subnet_id                     = azurerm_subnet.management.id
+    private_ip_address_allocation = "Static"
+    private_ip_address            = "10.10.4.50"
+  }
+}
+
+resource "azurerm_network_security_group" "dns" {
+  count               = var.config.enable_vpn_gateway ? 1 : 0
+  name                = "nsg-${var.name_prefix}-hub-dns"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  security_rule {
+    name                       = "AllowVpnDnsUdp"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "53"
+    source_address_prefixes    = concat(var.config.address_space, var.config.p2s_address_space)
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowVpnDnsTcp"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "53"
+    source_address_prefixes    = concat(var.config.address_space, var.config.p2s_address_space)
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowMgmtSsh"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefixes    = [var.config.management_subnet_prefix, var.config.bastion_subnet_prefix]
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_network_interface_security_group_association" "dns" {
+  count                     = var.config.enable_vpn_gateway ? 1 : 0
+  network_interface_id      = azurerm_network_interface.dns[0].id
+  network_security_group_id = azurerm_network_security_group.dns[0].id
+}
+
+resource "azurerm_linux_virtual_machine" "dns" {
+  count                           = var.config.enable_vpn_gateway ? 1 : 0
+  name                            = "vm-${var.name_prefix}-dns-01"
+  resource_group_name             = var.resource_group_name
+  location                        = var.location
+  size                            = "Standard_B2ls_v2"
+  admin_username                  = "dnsadmin"
+  admin_password                  = "DnsServerP@ssw0rd!"
+  disable_password_authentication = false
+  network_interface_ids           = [azurerm_network_interface.dns[0].id]
+  tags                            = var.tags
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  custom_data = base64encode(<<-EOF
+              #!/bin/bash
+              # 1. Usar temporalmente el DNS de Azure para la descarga e instalación de paquetes
+              echo "nameserver 168.63.129.16" > /etc/resolv.conf
+
+              # 2. Instalar dnsmasq
+              apt-get update
+              apt-get install -y dnsmasq
+
+              # 3. Deshabilitar systemd-resolved para liberar el puerto 53
+              systemctl stop systemd-resolved
+              systemctl disable systemd-resolved
+
+              # 4. Configurar dnsmasq como reenviador al DNS interno de Azure (168.63.129.16)
+              cat <<EOT > /etc/dnsmasq.conf
+              no-resolv
+              server=168.63.129.16
+              interface=*
+              bind-interfaces
+              cache-size=1000
+              log-queries
+              EOT
+
+              # 5. Establecer resolv.conf local definitivo para el sistema local
+              echo "nameserver 127.0.0.1" > /etc/resolv.conf
+
+              # 6. Habilitar y reiniciar dnsmasq
+              systemctl restart dnsmasq
+              systemctl enable dnsmasq
+              EOF
+  )
 }

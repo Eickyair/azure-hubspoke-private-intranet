@@ -26,3 +26,9 @@ azure-hubspoke-private-intranet.code-workspace
 
 # Agents
 .agents
+
+# VPN certificates
+vpn-certs/
+
+BASE.VPN.md
+walkthrough.md

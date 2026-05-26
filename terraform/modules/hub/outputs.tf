@@ -37,3 +37,7 @@ output "jumpbox_name" {
 output "jumpbox_private_ip" {
   value = try(azurerm_network_interface.jumpbox[0].private_ip_address, null)
 }
+
+output "dns_forwarder_private_ip" {
+  value = try(azurerm_network_interface.dns[0].private_ip_address, null)
+}

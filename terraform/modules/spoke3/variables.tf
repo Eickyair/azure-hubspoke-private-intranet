@@ -87,7 +87,18 @@ variable "hub_bastion_subnet_prefix" {
   description = "CIDR del AzureBastionSubnet del Hub. Permite SSH inbound a las VMs solo desde Bastion."
 }
 
+variable "hub_edge_subnet_prefix" {
+  type        = string
+  description = "CIDR del subnet Edge del Hub donde vive el Application Gateway. Permite acceso inbound al dashboard via HTTPS privado."
+}
+
 variable "hub_management_subnet_prefix" {
   type        = string
   description = "CIDR del hub management subnet (Jumpbox). Permite acceso API/Streamlit inbound para pruebas."
+}
+
+variable "vpn_client_address_prefixes" {
+  type        = list(string)
+  default     = []
+  description = "Lista de prefijos de red para clientes VPN P2S."
 }

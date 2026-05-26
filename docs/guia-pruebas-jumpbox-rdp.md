@@ -28,11 +28,11 @@ Valores esperados por defecto:
 | VM Jumpbox | `vm-privintra-lab-001-jumpbox-01` |
 | IP privada Jumpbox | `10.10.4.10` |
 | Usuario RDP | Valor de `jumpbox_admin_username` |
-| URL Intranet | `http://intranet.northwind.lab` |
-| URL Admin | `http://admin.northwind.lab` |
-| URL API liveness | `http://api.northwind.lab/live` |
-| URL API health | `http://api.northwind.lab/health` |
-| URL Dashboard | `http://kpi.northwind.lab:8501` |
+| URL Intranet | `https://intranet.northwind.lab` |
+| URL Admin | `https://admin.northwind.lab` |
+| URL API liveness | `https://api.northwind.lab/live` |
+| URL API health | `https://api.northwind.lab/health` |
+| URL Dashboard | `https://kpi.northwind.lab` |
 
 ## 2. Entrar a la Jumpbox por RDP
 
@@ -56,10 +56,12 @@ Al iniciar sesion por RDP:
 2. Abre el archivo `Private-Intranet-Checks.txt`.
 3. Revisa que aparezcan las URLs internas y comandos de prueba.
 4. Abre Microsoft Edge.
-5. Prueba primero `http://api.northwind.lab/live`.
-6. Luego prueba `http://api.northwind.lab/health`.
+5. Prueba primero `https://api.northwind.lab/live`.
+6. Luego prueba `https://api.northwind.lab/health`.
 
-Resultado esperado para `/live`: Edge muestra un JSON simple con `service`, `status: ok` y `checked_at`. Esto confirma que Application Gateway puede llegar a la app.
+La jumpbox instala la CA interna `Northwind Private Root CA` en el almacen `LocalMachine\Root` durante su inicializacion. Con eso Edge confia en el certificado autofirmado de `*.northwind.lab` y no deberia mostrar bloqueo de certificado.
+
+Resultado esperado para `/live`: Edge muestra un JSON simple con `service`, `status: ok` y `checked_at`. Esto confirma que Application Gateway puede llegar a la app por HTTPS.
 
 Resultado esperado para `/health`: Edge muestra un JSON con `service`, `status`, `checked_at` y `dependencies`.
 
@@ -69,11 +71,11 @@ Si el JSON dice `status: ok`, la API puede conectarse a MySQL App, MySQL Admin y
 
 Prueba grafica rapida:
 
-1. En Edge, abre `http://api.northwind.lab/live`.
+1. En Edge, abre `https://api.northwind.lab/live`.
 2. Si la pagina carga, DNS privado para `api.northwind.lab` funciona y el backend esta vivo.
-3. Abre `http://intranet.northwind.lab`.
-4. Abre `http://admin.northwind.lab`.
-5. Abre `http://kpi.northwind.lab:8501`.
+3. Abre `https://intranet.northwind.lab`.
+4. Abre `https://admin.northwind.lab`.
+5. Abre `https://kpi.northwind.lab`.
 
 Prueba opcional con PowerShell dentro de la jumpbox:
 
@@ -87,13 +89,13 @@ Resolve-DnsName kpi.northwind.lab
 Resultado esperado:
 
 - `intranet.northwind.lab`, `admin.northwind.lab` y `api.northwind.lab` deben resolver hacia la IP privada del Application Gateway, normalmente `10.10.2.10`.
-- `kpi.northwind.lab` debe resolver hacia la IP privada del dashboard, normalmente `10.40.2.20`.
+- `kpi.northwind.lab` debe resolver hacia la IP privada del Application Gateway, normalmente `10.10.2.10`.
 
 Si DNS falla, revisa en Azure Portal que la zona privada `northwind.lab` tenga registros `A` y que este enlazada a la VNet del Hub.
 
 ## 5. Probar Intranet grafica
 
-1. En Edge, abre `http://intranet.northwind.lab`.
+1. En Edge, abre `https://intranet.northwind.lab`.
 2. Debes ver la pantalla **Intranet privada**.
 3. Revisa el bloque **Estado general**.
 4. Revisa el bloque **API privada**.
@@ -105,11 +107,11 @@ Resultado esperado:
 - La dependencia `api-private` aparece conectada.
 - La pagina se refresca sola cada cierto tiempo.
 
-Si la pagina carga pero el estado sale con error, el frontend esta vivo pero no puede llegar a la API. En ese caso prueba directamente `http://api.northwind.lab/live` y despues `http://api.northwind.lab/health`.
+Si la pagina carga pero el estado sale con error, el frontend esta vivo pero no puede llegar a la API. En ese caso prueba directamente `https://api.northwind.lab/live` y despues `https://api.northwind.lab/health`.
 
 ## 6. Probar Admin grafico
 
-1. En Edge, abre `http://admin.northwind.lab`.
+1. En Edge, abre `https://admin.northwind.lab`.
 2. Debes ver la pantalla **Administracion privada**.
 3. Revisa las filas **API privada** y **MySQL admin**.
 
@@ -122,8 +124,8 @@ Si `API privada` falla, revisa Application Gateway y Private Endpoint de la API.
 
 ## 7. Probar API, MySQL y Blob desde la pantalla de health
 
-1. En Edge, abre primero `http://api.northwind.lab/live`.
-2. Si responde `status: ok`, abre `http://api.northwind.lab/health`.
+1. En Edge, abre primero `https://api.northwind.lab/live`.
+2. Si responde `status: ok`, abre `https://api.northwind.lab/health`.
 3. Revisa el JSON.
 4. Busca estas dependencias:
 
@@ -154,7 +156,7 @@ Si `/live` responde pero `/health` falla, la app esta encendida pero alguna depe
 
 ## 8. Probar Dashboard de analitica
 
-1. En Edge, abre `http://kpi.northwind.lab:8501`.
+1. En Edge, abre `https://kpi.northwind.lab`.
 2. Debes ver el dashboard Streamlit **Dashboard interno de analitica**.
 3. Revisa el indicador **Estado general**.
 4. Revisa las tarjetas:
@@ -165,17 +167,19 @@ Si `/live` responde pero `/health` falla, la app esta encendida pero alguna depe
 
 Resultado esperado:
 
-- El dashboard carga desde la IP privada de la VM de dashboard.
+- El dashboard carga por HTTPS a traves del Application Gateway privado.
 - Las tarjetas de MySQL aparecen conectadas.
 - El ETL Runner responde correctamente.
 
 Si la pagina no carga, prueba en PowerShell:
 
 ```powershell
-Test-NetConnection kpi.northwind.lab -Port 8501
+Test-NetConnection kpi.northwind.lab -Port 443
 ```
 
 Debe mostrar `TcpTestSucceeded : True`.
+
+Nota: `kpi.northwind.lab` ya no publica el puerto `8501` directamente. El acceso de usuario es `https://kpi.northwind.lab` por `443`, y el puerto `8501` queda solo para el backend interno de Streamlit.
 
 ## 9. Probar conectividad a VMs privadas de Spoke3
 
@@ -260,7 +264,7 @@ Resultado esperado: la conexion debe ser exitosa desde la jumpbox porque esta de
 
 ## 13. Revisar Blob Storage de forma grafica
 
-La API ya valida Blob al abrir `http://api.northwind.lab/health`. Si quieres inspeccionar el contenedor con interfaz grafica:
+La API ya valida Blob al abrir `https://api.northwind.lab/health`. Si quieres inspeccionar el contenedor con interfaz grafica:
 
 1. En la jumpbox, instala Microsoft Azure Storage Explorer.
 2. Abre Storage Explorer.
@@ -277,10 +281,10 @@ Usa este orden para probar sin saltos:
 
 1. Entra por RDP a la jumpbox con Azure Bastion.
 2. Abre `Private-Intranet-Checks.txt` en el escritorio.
-3. Abre `http://api.northwind.lab/health`.
-4. Abre `http://intranet.northwind.lab`.
-5. Abre `http://admin.northwind.lab`.
-6. Abre `http://kpi.northwind.lab:8501`.
+3. Abre `https://api.northwind.lab/health`.
+4. Abre `https://intranet.northwind.lab`.
+5. Abre `https://admin.northwind.lab`.
+6. Abre `https://kpi.northwind.lab`.
 7. En Azure Portal, revisa Backend health del Application Gateway.
 8. En Azure Portal, revisa Networking de App Services y Private Endpoints.
 9. Opcional: valida MySQL con MySQL Workbench.
@@ -296,7 +300,7 @@ Usa este orden para probar sin saltos:
 | Intranet carga pero API sale con error | API viva pero dependencia fallando | API `/live`, API `/health`, Backend health |
 | API health dice MySQL error | DNS privado MySQL, credenciales o servidor no listo | MySQL Flexible Server, zona `privatelink.mysql.database.azure.com` |
 | API health dice Blob error | Storage privado, contenedor o key | Storage Account, Private Endpoint Blob, contenedor `documents` |
-| Dashboard no carga | VM dashboard o puerto 8501 | VM dashboard, NSG dashboard, servicio Streamlit |
+| Dashboard no carga | Application Gateway, VM dashboard o backend 8501 | Application Gateway, Backend health, VM dashboard, NSG dashboard, servicio Streamlit |
 | ETL aparece con error | VM ETL o puerto 8000 | VM ETL, NSG ETL, cloud-init |
 
 ## 16. Criterio de exito
@@ -304,10 +308,10 @@ Usa este orden para probar sin saltos:
 La infraestructura se considera funcional para la practica cuando se cumple todo esto desde la jumpbox:
 
 - RDP entra por Azure Bastion.
-- `http://api.northwind.lab/live` devuelve `status: ok`.
-- `http://api.northwind.lab/health` devuelve `status: ok` cuando MySQL y Blob estan listos.
-- `http://intranet.northwind.lab` carga y muestra API conectada.
-- `http://admin.northwind.lab` carga y muestra API y MySQL admin correctos.
-- `http://kpi.northwind.lab:8501` carga el dashboard.
+- `https://api.northwind.lab/live` devuelve `status: ok`.
+- `https://api.northwind.lab/health` devuelve `status: ok` cuando MySQL y Blob estan listos.
+- `https://intranet.northwind.lab` carga y muestra API conectada.
+- `https://admin.northwind.lab` carga y muestra API y MySQL admin correctos.
+- `https://kpi.northwind.lab` carga el dashboard.
 - Application Gateway muestra backends saludables.
 - No se necesita IP publica en App Services, MySQL, Storage ni VMs de Spoke3.
