@@ -1,85 +1,83 @@
 import os
-from datetime import datetime, timezone
-
 import pymysql
-import requests
 import streamlit as st
 
+# Configuración de la página
+st.set_page_config(page_title="Northwind KPI Dashboard", page_icon="📊", layout="wide")
+st.title("📊 Dashboard de Analítica - Northwind")
+st.markdown("Métricas clave de negocio extraídas desde el Spoke 2.")
 
-SERVICE_NAME = os.getenv("SERVICE_NAME", "dashboard-kpi-01")
-ETL_HEALTH_URL = os.getenv("ETL_HEALTH_URL", "http://etl-runner-01:8000/health")
-REQUEST_TIMEOUT_SECONDS = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "4"))
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
 
+# Función para conectarse a la base de analítica
+@st.cache_data(ttl=60) # Hace caché por 60 segundos para no saturar la BD
+def get_kpi_data():
+    # Toma las variables de entorno inyectadas por Azure o tu local
+    host = os.getenv("MYSQL_ANALYTICS_HOST", "127.0.0.1")
+    database = os.getenv("MYSQL_ANALYTICS_DATABASE", "intranet_analytics")
+    user = os.getenv("MYSQL_ANALYTICS_USER", "root")
+    password = os.getenv("MYSQL_ANALYTICS_PASSWORD", "labadmin")
 
-def check_mysql(prefix: str, label: str) -> dict:
-    host = os.getenv(f"{prefix}_HOST", "")
-    database = os.getenv(f"{prefix}_DATABASE", "")
-    user = os.getenv(f"{prefix}_USER", "")
-    password = os.getenv(f"{prefix}_PASSWORD", "")
-
-    if not all([host, database, user, password]):
-        return {"name": label, "status": "not_configured"}
-
-    started = datetime.now(timezone.utc)
     try:
-        connection = pymysql.connect(
+        conn = pymysql.connect(
             host=host,
             port=MYSQL_PORT,
             user=user,
             password=password,
             database=database,
-            connect_timeout=4,
+            connect_timeout=10,
             ssl={"check_hostname": False},
+            cursorclass=pymysql.cursors.DictCursor
         )
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-        connection.close()
-        elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-        return {"name": label, "status": "ok", "host": host, "database": database, "elapsed_ms": elapsed_ms}
-    except Exception as exc:
-        elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-        return {"name": label, "status": "error", "host": host, "database": database, "elapsed_ms": elapsed_ms, "error": str(exc)}
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT kpi_name, kpi_value, kpi_category, updated_at FROM kpi_summary")
+            data = cursor.fetchall()
+        conn.close()
+        return data
+    except Exception as e:
+        st.error(f"Error conectando a la base de datos de Analítica: {e}")
+        return []
 
+# Extraer la data
+datos_kpi = get_kpi_data()
 
-def check_etl() -> dict:
-    started = datetime.now(timezone.utc)
-    try:
-        response = requests.get(ETL_HEALTH_URL, timeout=REQUEST_TIMEOUT_SECONDS)
-        elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-        return {"name": "etl-runner", "status": "ok" if response.ok else "error", "url": ETL_HEALTH_URL, "http_status": response.status_code, "elapsed_ms": elapsed_ms}
-    except Exception as exc:
-        elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-        return {"name": "etl-runner", "status": "error", "url": ETL_HEALTH_URL, "elapsed_ms": elapsed_ms, "error": str(exc)}
+if not datos_kpi:
+    st.warning("No hay datos en la tabla kpi_summary. ¿Ya ejecutaste el ETL en http://localhost:8010/docs ?")
+else:
+    # --- PROCESAMIENTO BÁSICO ---
+    # Convertimos la lista de diccionarios a variables más fáciles de usar
+    nomina = next((item['kpi_value'] for item in datos_kpi if item['kpi_name'] == 'nomina_mensual_total'), 0)
+    inventario = next((item['kpi_value'] for item in datos_kpi if item['kpi_name'] == 'valor_inventario_total'), 0)
+    
+    # --- SECCIÓN 1: KPIs SUPERIORES ---
+    st.subheader("Indicadores Globales")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="Nomina Mensual Activa", value=f"${nomina:,.2f} MXN")
+    with col2:
+        st.metric(label="Valor del Inventario", value=f"${inventario:,.2f} MXN")
 
+    st.divider()
 
-def render_card(title: str, result: dict) -> None:
-    status = result.get("status", "unknown")
-    if status == "ok":
-        st.success(f"{title}: conectado")
-    elif status == "not_configured":
-        st.warning(f"{title}: variables pendientes")
-    else:
-        st.error(f"{title}: error")
-    st.json(result)
+    # --- SECCIÓN 2: GRÁFICAS ---
+    col_chart1, col_chart2 = st.columns(2)
+    
+    with col_chart1:
+        st.subheader("Empleados por Departamento")
+        # Filtramos los kpis que empiezan con 'empleados_dept_'
+        dept_data = {item['kpi_name'].replace('empleados_dept_', ''): item['kpi_value'] 
+                     for item in datos_kpi if item['kpi_name'].startswith('empleados_dept_')}
+        if dept_data:
+            st.bar_chart(dept_data)
 
-
-st.set_page_config(page_title=SERVICE_NAME, page_icon="OK", layout="wide")
-st.title("Dashboard interno de analitica")
-st.caption(f"Revision: {datetime.now(timezone.utc).isoformat()}")
-
-checks = {
-    "MySQL Analytics": check_mysql("MYSQL_ANALYTICS", "mysql-analytics-db"),
-    "MySQL App Source": check_mysql("MYSQL_APP", "mysql-app-db"),
-    "MySQL Admin Source": check_mysql("MYSQL_ADMIN", "mysql-admin-db"),
-    "ETL Runner": check_etl(),
-}
-
-overall_ok = all(item["status"] == "ok" for item in checks.values())
-st.metric("Estado general", "OK" if overall_ok else "Revisar")
-
-columns = st.columns(2)
-for index, (title, result) in enumerate(checks.items()):
-    with columns[index % 2]:
-        render_card(title, result)
+    with col_chart2:
+        st.subheader("Stock por Categoría")
+        # Filtramos los kpis que empiezan con 'stock_categoria_'
+        cat_data = {item['kpi_name'].replace('stock_categoria_', ''): item['kpi_value'] 
+                    for item in datos_kpi if item['kpi_name'].startswith('stock_categoria_')}
+        if cat_data:
+            st.bar_chart(cat_data)
+            
+    # Timestamp de última actualización
+    ultimo_update = datos_kpi[0]['updated_at'] if datos_kpi else "Desconocido"
+    st.caption(f"Última ejecución del ETL: {ultimo_update}")
