@@ -312,6 +312,8 @@ resource "azurerm_key_vault_secret" "mysql_password" {
   value        = var.mysql_administrator_password
   key_vault_id = module.hub.key_vault_id
   content_type = "text/plain"
+
+  depends_on = [module.hub]
 }
 
 resource "azurerm_key_vault_secret" "storage_key" {
@@ -319,6 +321,8 @@ resource "azurerm_key_vault_secret" "storage_key" {
   value        = module.spoke2.storage_primary_access_key
   key_vault_id = module.hub.key_vault_id
   content_type = "text/plain"
+
+  depends_on = [module.hub]
 }
 
 resource "azurerm_key_vault_secret" "jumpbox_password" {
@@ -326,4 +330,6 @@ resource "azurerm_key_vault_secret" "jumpbox_password" {
   value        = var.jumpbox_admin_password
   key_vault_id = module.hub.key_vault_id
   content_type = "text/plain"
+
+  depends_on = [module.hub]
 }

@@ -24,12 +24,14 @@ flowchart TB
     end
 
     api["[Spoke 1] api-private"]:::app
+    adminapi["[Spoke 1] admin-api"]:::app
     etl["[Spoke 3] etl-runner-01"]:::analytics
     dns["[Hub] Private DNS Zones"]:::hub
 
     api -->|"MySQL :3306"| mysql_app
     api -->|"MySQL :3306"| mysql_admin
     api -->|"HTTPS :443"| peblob
+    adminapi -->|"MySQL :3306"| mysql_admin
     etl -->|"MySQL :3306"| mysql_app
     etl -->|"MySQL :3306"| mysql_admin
     peblob -.->|"Private Link"| blobdocs
@@ -37,7 +39,8 @@ flowchart TB
     dns -.->|"DNS :53"| mysql_admin
     dns -.->|"DNS :53"| peblob
 
-    api ~~~ etl
+    api ~~~ adminapi
+    adminapi ~~~ etl
     etl ~~~ dns
 
     style spoke2 fill:#f8fafc,stroke:#b28704,stroke-width:2px;

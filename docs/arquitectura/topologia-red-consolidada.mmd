@@ -23,7 +23,7 @@ flowchart LR
 
         subgraph edgesubnet["snet-privintra-lab-001-hub-edge 10.10.2.0/24"]
             direction TB
-            agw["Application Gateway WAF<br/>IP privada 10.10.2.10<br/>Hosts: intranet, admin y api.northwind.lab"]:::hub
+            agw["Application Gateway WAF_v2<br/>IP privada 10.10.2.10<br/>Backends: intranet / admin / api / kpi.northwind.lab"]:::hub
         end
 
         subgraph pesubnet["snet-privintra-lab-001-hub-pe 10.10.3.0/24"]
@@ -99,7 +99,8 @@ flowchart LR
     sp1core ---|"Peering directo"| sp2core
     sp2core ---|"Peering directo"| sp3core
 
-    agw -->|"HTTPS privado"| appspe
+    agw -->|"HTTPS :443"| appspe
+    agw -->|"HTTP :8501 (analytics)"| dashboard
     appspe -.->|"Private Link"| apps
     apps -->|"MySQL 3306"| mysqlops
     apps -->|"HTTPS 443"| blobpe
@@ -108,9 +109,9 @@ flowchart LR
     etl -->|"MySQL 3306"| mysqlops
     etl -->|"MySQL 3306"| mysqlanalytics
     dashboard -->|"MySQL 3306"| mysqlanalytics
+    dashboard -->|"MySQL 3306"| mysqlops
 
-    dns -.->|"intranet, admin, api -> 10.10.2.10"| agw
-    dns -.->|"kpi -> 10.40.2.20"| dashboard
+    dns -.->|"intranet, admin, api, kpi -> 10.10.2.10"| agw
     dns -.->|"Privatelink App Services"| appspe
     dns -.->|"Privatelink MySQL"| mysqlops
     dns -.->|"Privatelink MySQL"| mysqlanalytics

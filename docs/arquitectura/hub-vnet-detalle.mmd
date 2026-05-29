@@ -11,26 +11,31 @@ flowchart TB
         direction LR
         subgraph gwsubnet["GatewaySubnet 10.10.0.0/24"]
             direction TB
-            vpn["vpn-gw-hub-01<br/>Azure VPN Gateway VpnGw1AZ<br/>Pool P2S 172.16.10.0/24"]:::hub
+            vpn["vpn-gw-hub-01<br/>Azure VPN Gateway VpnGw1AZ<br/>OpenVPN + Certificado<br/>Pool P2S 172.16.10.0/24"]:::hub
         end
 
         subgraph bastionsubnet["AzureBastionSubnet 10.10.1.0/26"]
             direction TB
-            bastion["bastion-hub-01<br/>Azure Bastion<br/>IP privada 10.10.1.4"]:::hub
+            bastion["bastion-hub-01<br/>Azure Bastion Standard"]:::hub
         end
 
-        subgraph edgesubnet["EdgeSubnet 10.10.2.0/24"]
+        subgraph edgesubnet["EdgeSubnet snet-hub-edge 10.10.2.0/24"]
             direction TB
-            agw["agw-hub-private<br/>Application Gateway WAF<br/>IP privada 10.10.2.10<br/>Hosts: intranet.northwind.lab / admin.northwind.lab"]:::hub
+            agw["agw-hub-private<br/>Application Gateway WAF_v2 (OWASP 3.2)<br/>IP privada 10.10.2.10<br/>Backends: intranet / admin / api / kpi.northwind.lab"]:::hub
         end
 
-        subgraph mgmtsubnet["ManagementSubnet 10.10.4.0/24"]
+        subgraph pesubnet["snet-hub-pe 10.10.3.0/24"]
+            direction TB
+            kvpe["pe-kv<br/>Private Endpoint Key Vault"]:::hub
+        end
+
+        subgraph mgmtsubnet["ManagementSubnet snet-hub-mgmt 10.10.4.0/24"]
             direction TB
             jumpbox["jumpbox-hub-01<br/>Windows Server VM<br/>IP privada 10.10.4.10"]:::hub
-            dnsforwarder["vm-dns-forwarder-01<br/>Linux DNS Forwarder<br/>IP privada 10.10.4.50"]:::hub
+            dnsforwarder["vm-dns-forwarder-01<br/>Linux DNS Forwarder (dnsmasq)<br/>IP privada 10.10.4.50"]:::hub
         end
 
-        shared["Servicios compartidos del Hub<br/>Private DNS Zones<br/>privatelink.azurewebsites.net<br/>privatelink.mysql.database.azure.com<br/>privatelink.blob.core.windows.net<br/>Key Vault: kv-intranet.privatelink.vaultcore.azure.net<br/>Azure Monitor + Log Analytics"]:::hub
+        shared["Servicios compartidos del Hub<br/>Private DNS Zones<br/>privatelink.azurewebsites.net<br/>privatelink.mysql.database.azure.com<br/>privatelink.blob.core.windows.net<br/>privatelink.vaultcore.azure.net<br/>northwind.lab (registros A: intranet / admin / api / kpi → 10.10.2.10)<br/>Key Vault + Log Analytics"]:::hub
     end
 
     laptops["Laptops del equipo<br/>Clientes P2S"]:::external
@@ -38,15 +43,17 @@ flowchart TB
     spoke2["[Spoke 2] Datos privados"]:::data
     spoke3["[Spoke 3] ETL y dashboard"]:::analytics
 
-    laptops -->|"SSL VPN :443 / IKEv2"| vpn
+    laptops -->|"OpenVPN :443 (certificado)"| vpn
     vpn -->|"Rutas privadas por peering"| spoke1
     vpn -->|"Rutas privadas por peering"| spoke2
     vpn -->|"Rutas privadas por peering"| spoke3
     agw -->|"HTTPS :443"| spoke1
+    agw -->|"HTTP :8501 (analytics)"| spoke3
     shared -.->|"DNS+KV :443"| spoke1
     shared -.->|"DNS :53/443"| spoke2
     shared -.->|"DNS+Mon :443"| spoke3
-    bastion -.->|"Mgmt :443"| spoke3
+    kvpe -.->|"Private Link"| shared
+    bastion -.->|"SSH :22"| spoke3
     jumpbox -.->|"Pruebas internas"| spoke1
     dnsforwarder -.->|"Forwarding a 168.63.129.16"| shared
 
@@ -57,6 +64,7 @@ flowchart TB
     style gwsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
     style bastionsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
     style edgesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
+    style pesubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
     style mgmtsubnet fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px;
 
     classDef title fill:#ffffff,stroke:#ffffff,color:#1f2937,font-size:20px,font-weight:bold;

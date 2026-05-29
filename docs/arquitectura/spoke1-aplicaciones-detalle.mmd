@@ -35,6 +35,7 @@ flowchart TB
 
     agw -->|"HTTPS :443"| peportal
     agw -->|"HTTPS :443"| peadmin
+    agw -->|"HTTPS :443"| peapi
     peportal -.->|"PrivLink"| portal
     peadmin -.->|"PrivLink"| adminapp
     peapi -.->|"PrivLink"| api
