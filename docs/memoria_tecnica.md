@@ -14,6 +14,7 @@
 | Versión | Fecha | Descripción | Autores |
 | --- | --- | --- | --- |
 | 1.0 | 25/05/2026 | Versión inicial de la memoria técnica del proyecto. | Erick Aguilar, Carlos E. Mendoza H., Alan Magno |
+| 1.1 | 29/05/2026 | Migración de peerings directos inter-spoke a topología Hub-and-Spoke pura con NVA de tránsito y tablas de ruta (UDR); resolución de carrera de propagación RBAC en Key Vault; automatización de certificados e importación de recursos en el script de despliegue; actualización del modelo de costos. | Erick Aguilar, Carlos E. Mendoza H., Alan Magno |
 
 ### Perfil del Equipo de Trabajo
 
@@ -50,7 +51,7 @@ La topología de red se estructura en un Hub VNet central que actúa como concen
 | | `AzureBastionSubnet` | `10.10.1.0/26` | Host de Bastion para administración segura |
 | | `snet-privintra-hub-edge` | `10.10.2.0/24` | Application Gateway WAF (`10.10.2.10`) |
 | | `snet-privintra-hub-pe` | `10.10.3.0/24` | Private Endpoints compartidos (Key Vault) |
-| | `snet-privintra-hub-mgmt`| `10.10.4.0/24` | Jumpbox Windows (`10.10.4.10`) y DNS Forwarder (`10.10.4.50`) |
+| | `snet-privintra-hub-mgmt`| `10.10.4.0/24` | Jumpbox Windows (`10.10.4.10`), DNS Forwarder (`10.10.4.50`) y NVA de tránsito inter-spoke (`10.10.4.100`) |
 | **Spoke 1 (Apps)**<br/>`10.20.0.0/16`| `snet-spoke1-appsvc` | `10.20.1.0/24` | Integración de red para App Services (Intranet, Admin, APIs) |
 | | `snet-spoke1-pe` | `10.20.2.0/24` | Private Endpoints para acceso privado a las WebApps |
 | **Spoke 2 (Datos)**<br/>`10.30.0.0/16`| `snet-spoke2-mysql` | `10.30.1.0/24` | Subred delegada para Azure Database for MySQL Flexible Servers |
@@ -77,6 +78,7 @@ flowchart LR
         subgraph mgmtsubnet["ManagementSubnet (10.10.4.0/24)"]
             jumpbox["Jumpbox Windows VM\n10.10.4.10"]
             dnsforwarder["DNS Forwarder VM\n10.10.4.50"]
+            nva["NVA Linux (Hub-Transit)\n10.10.4.100\nip_forwarding + iptables FORWARD"]
         end
         dns["Private DNS Zones\nnorthwind.lab"]
         kv["Key Vault + Log Analytics"]
@@ -119,27 +121,32 @@ flowchart LR
     vpn -->|"Rutas privadas"| appspe
     agw -->|"HTTPS (Backend)"| appspe
     appspe -.->|"Private Link"| apps
-    apps -->|"MySQL :3306"| mysqlops
     apps -->|"HTTPS :443"| blobpe
-    
-    %% Peerings Inter-Spoke directos
-    spoke1 <==>|"Peering Directo"| spoke2
-    spoke2 <==>|"Peering Directo"| spoke3
-    
-    %% Tráfico ETL y Dashboard
-    etl -->|"Extracción MySQL :3306"| mysqlops
-    etl -->|"Carga MySQL :3306"| mysqlanalytics
-    dashboard -->|"Lectura MySQL :3306"| mysqlanalytics
-    
+
+    %% Peerings Hub-Spoke (toda la conectividad pasa por el Hub)
+    spoke1 <==>|"Peering Hub-Spoke"| hub
+    spoke2 <==>|"Peering Hub-Spoke"| hub
+    spoke3 <==>|"Peering Hub-Spoke"| hub
+
+    %% Tráfico inter-spoke enrutado vía NVA del Hub (UDR next-hop VirtualAppliance)
+    apps -.->|"UDR → NVA"| nva
+    etl -.->|"UDR → NVA"| nva
+    dashboard -.->|"UDR → NVA"| nva
+    nva -->|"forward MySQL :3306"| mysqlops
+    nva -->|"forward MySQL :3306"| mysqlanalytics
+
     %% DNS y gestión
     dnsforwarder -.->|"Resolución recursive"| dns
     vpn -.->|"DNS Server: 10.10.4.50"| dnsforwarder
 ```
 
 ### 2.3 Peerings y Flujos de Tráfico
-*   **Peerings Hub-Spoke:** Se crearon enlaces de VNet Peering entre el Hub y los Spokes 1, 2 y 3. El peering desde el Hub tiene habilitada la opción de *Gateway Transit*, permitiendo que las redes de los Spokes utilicen el VPN Gateway del Hub para comunicarse de vuelta hacia los clientes VPN (*Use Remote Gateways*).
-*   **Peerings Directos Inter-Spoke (Sin tránsito por el Hub):** Se implementaron peerings directos entre el Spoke 1 (Apps) <-> Spoke 2 (Datos) y entre el Spoke 2 (Datos) <-> Spoke 3 (Analítica). 
-    *   *Razón de diseño:* Por defecto, Azure no enruta tráfico entre spokes a menos que se configure una NVA (Network Virtual Appliance) o un Azure Firewall en el Hub. Si canalizáramos el tráfico transaccional de base de datos y la carga de imágenes a través del Hub, incurriríamos en sobrecostos significativos por procesamiento de datos en el firewall y mayor latencia. El peering directo permite comunicación a velocidad de red troncal de Azure con costo mínimo.
+*   **Peerings Hub-Spoke:** Se crearon enlaces de VNet Peering entre el Hub y los Spokes 1, 2 y 3. El peering desde el Hub tiene habilitada la opción de *Gateway Transit*, permitiendo que las redes de los Spokes utilicen el VPN Gateway del Hub para comunicarse de vuelta hacia los clientes VPN (*Use Remote Gateways*). **No existen peerings directos entre Spokes:** toda la comunicación inter-spoke transita obligatoriamente por el Hub, respetando la topología Hub-and-Spoke pura.
+*   **Tránsito Inter-Spoke vía Hub-Transit NVA:** Como Azure no enruta tráfico entre spokes a través de un peering Hub-Spoke por sí solo, se desplegó una NVA (*Network Virtual Appliance*) Linux en la subred de administración del Hub (`10.10.4.100`) que actúa como punto de reenvío L3:
+    *   La NVA tiene `ip_forwarding_enabled = true` en su NIC y aplica `iptables -P FORWARD ACCEPT` (habilitado de forma persistente vía `sysctl net.ipv4.ip_forward = 1` y una tarea `cron @reboot`), inicializada con `custom_data` de cloud-init.
+    *   En cada Spoke se asociaron **tablas de ruta definidas por el usuario (UDR)** a las subredes que originan tráfico inter-spoke (integración de App Services en Spoke 1, subred delegada de MySQL en Spoke 2, y subredes de ETL y Dashboard en Spoke 3). Cada ruta apunta los CIDR de los spokes remotos con `next_hop_type = "VirtualAppliance"` hacia la IP de la NVA.
+    *   El flujo resultante es: `Spoke origen → (UDR) → NVA del Hub → (forward) → Spoke destino`. Por ejemplo, las APIs de Spoke 1 alcanzan MySQL en Spoke 2, y el ETL de Spoke 3 extrae datos de Spoke 2, siempre transitando por la NVA.
+    *   *Razón de diseño:* Esta migración (commit `8db3127`) reemplazó los cuatro peerings directos inter-spoke previos por una topología Hub-and-Spoke canónica. Concentrar el tráfico inter-spoke en una NVA del Hub centraliza el control de enrutamiento y permite, a futuro, insertar inspección, registro o filtrado L4/L7 en un único punto, a un costo de cómputo mínimo frente a un Azure Firewall administrado.
 
 ---
 
@@ -152,6 +159,7 @@ flowchart LR
 *   **Azure Key Vault:** Centraliza secretos (contraseñas de MySQL, llaves de Storage y certificados PFX de HTTPS) protegiéndolos mediante políticas de acceso RBAC.
 *   **Jumpbox Windows Server VM (`Standard_B4s_v2`):** Actúa como entorno de pruebas y diagnóstico de la red interna.
 *   **DNS Forwarder VM (`10.10.4.50`):** Máquina Linux ejecutando `dnsmasq` configurada para resolver peticiones DNS privadas a clientes conectados por VPN.
+*   **NVA de Tránsito Inter-Spoke (`vm-privintra-lab-001-nva-01`, `10.10.4.100`):** Máquina virtual Linux (`Standard_B4s_v2`, Ubuntu 22.04) que reenvía a nivel de red el tráfico entre los Spokes. Tiene `ip_forwarding_enabled` en su NIC y reglas `iptables FORWARD ACCEPT` persistentes; es el *next-hop* (`VirtualAppliance`) de las tablas de ruta UDR de los tres Spokes. Su contraseña de administrador se genera dinámicamente con `random_password` (sin credenciales en el código). Está protegida por un NSG dedicado que solo admite tránsito desde el espacio `10.0.0.0/8` y deniega el resto del tráfico entrante.
 *   **Log Analytics Workspace (`law-privintra-lab-001-shared`):** Espacio de trabajo centralizado para la recolección de métricas, logs de diagnóstico y telemetría de los recursos del proyecto. Configurado con retención de 30 días y SKU `PerGB2018`.
 
 ### 3.2 Spoke 1 (Aplicaciones)
@@ -263,13 +271,14 @@ Para asegurar la viabilidad económica de la plataforma durante los próximos 3 
 | **App Services (WebApps/APIs)**| 4 aplicaciones montadas en el mismo Plan B1 | - | Incluido | $0.00 |
 | **MySQL Flexible Servers** | `B_Standard_B1ms` (1 vCPU, 2GB) + 20GB | 3 | $12.34 | $37.02 |
 | **Jumpbox Windows VM** | `Standard_B4s_v2` (4 vCPU, 16GB RAM) | 1 | $124.10 | $124.10 |
+| **NVA de Tránsito Inter-Spoke** | `Standard_B4s_v2` (4 vCPU, 16GB RAM) | 1 | $124.10 | $124.10 |
 | **DNS Forwarder VM** | `Standard_B2ls_v2` (2 vCPU, 4GB RAM) | 1 | $16.50 | $16.50 |
 | **ETL Linux VM** | `Standard_B2ls_v2` (2 vCPU, 4GB RAM) | 1 | $16.50 | $16.50 |
 | **Dashboard Linux VM** | `Standard_B2ls_v2` (2 vCPU, 4GB RAM) | 1 | $16.50 | $16.50 |
-| **Managed Disks (OS)** | 1x127GB Standard SSD (Jumpbox) + 3x32GB Standard SSD | 4 | - | $10.59 |
+| **Managed Disks (OS)** | 1x127GB Standard SSD (Jumpbox) + 4x32GB Standard SSD (NVA, DNS, ETL, Dashboard) | 5 | - | $12.99 |
 | **Direcciones IP Públicas** | Static IPs (Bastion, VPN, AppGw) | 3 | $2.63 | $7.89 |
 | **Log Analytics & Storage** | Transacciones de red, almacenamiento básico | - | Estimado | $7.00 |
-| **Total Mensual (PAYG)** | | | | $540.91 |
+| **Total Mensual (PAYG)** | | | | $667.41 |
 
 ---
 
@@ -277,12 +286,12 @@ Para asegurar la viabilidad económica de la plataforma durante los próximos 3 
 
 #### 1. Automatización de Encendido y Apagado (8x5) para Máquinas Virtuales
 Dado que esta es una intranet académica / corporativa con horario de oficina (Lunes a Viernes de 9:00 AM a 7:00 PM - 50 horas semanales), no es eficiente mantener encendidas las VMs administrativas y analíticas 24/7.
-*   **Recursos Afectados:** Jumpbox Windows (`Standard_B4s_v2`), DNS Forwarder, ETL VM y Dashboard Streamlit VM.
+*   **Recursos Afectados:** Jumpbox Windows (`Standard_B4s_v2`), NVA de Tránsito (`Standard_B4s_v2`), DNS Forwarder, ETL VM y Dashboard Streamlit VM. La NVA se incluye en el apagado 8x5 porque los flujos de datos inter-spoke (consultas de las APIs a MySQL, extracción del ETL) solo ocurren en horario de oficina.
 *   **Patrón de Uso:** Reducción de 730 horas/mes a 220 horas/mes (aproximadamente un 30% del tiempo encendido).
 *   **Ahorro Mensual Computado:**
-    *   Costo compute VM sin apagar: $173.60/mes.
-    *   Costo compute VM con apagado 8x5 (30.1%): $52.26/mes.
-    *   Ahorro mensual obtenido: $121.34/mes (reducción del 22.4% sobre la factura total).
+    *   Costo compute VM sin apagar: $297.70/mes.
+    *   Costo compute VM con apagado 8x5 (30.1%): $89.61/mes.
+    *   Ahorro mensual obtenido: $208.09/mes (reducción del 31.2% sobre la factura total).
 
 #### 2. Adquisición de Instancias Reservadas (RI) a 3 Años
 Para los servicios que requieren disponibilidad constante 24/7, el esquema de reserva a 3 años proporciona descuentos de hasta el 50% sobre el coste de computación habitual.
@@ -297,9 +306,9 @@ Para los servicios que requieren disponibilidad constante 24/7, el esquema de re
 
 | Estrategia | Detalle Mensual | Costo Mensual Promedio | Costo Total (36 Meses) | Ahorro Total |
 | --- | --- | --- | --- | --- |
-| **Opción A: PAYG Puro (Sin Optimizar)** | Recursos corriendo 24/7 sin descuentos. | $540.91 | $19,472.76 | $0.00 (Base) |
-| **Opción B: Solo Reservaciones a 3 Años** | Reserva de cómputo para todas las VMs, bases de datos y App Services. | $432.70 | $15,577.20 | $3,895.56 (20.0%) |
-| **Opción C: Estrategia Mixta (Recomendada)** | RI a 3 años en bases de datos y App Service Plan + Apagado 8x5 en Máquinas Virtuales. | $401.65 | $14,459.40 | $5,013.36 (25.7%) |
+| **Opción A: PAYG Puro (Sin Optimizar)** | Recursos corriendo 24/7 sin descuentos. | $667.41 | $24,026.76 | $0.00 (Base) |
+| **Opción B: Solo Reservaciones a 3 Años** | Reserva de cómputo para todas las VMs, bases de datos y App Services. | $494.70 | $17,809.20 | $6,217.56 (25.9%) |
+| **Opción C: Estrategia Mixta (Recomendada)** | RI a 3 años en bases de datos y App Service Plan + Apagado 8x5 en Máquinas Virtuales. | $441.41 | $15,890.76 | $8,136.00 (33.9%) |
 
 Decisión Técnica Justificada: Se adopta la Opción C (Estrategia Mixta). Al apagar las VMs de analítica y pruebas durante las noches y fines de semana obtenemos un ahorro masivo sin penalizar la disponibilidad transaccional, mientras que el núcleo de la base de datos y la aplicación se benefician de la tarifa reducida por reserva a 3 años.
 
@@ -321,15 +330,33 @@ Durante el desarrollo del despliegue de infraestructura mediante Terraform, surg
 *   **Problema (Commit `ed84fd9`):** Al configurar la terminación SSL HTTPS en el Application Gateway con un certificado PFX almacenado en Key Vault, la API de Azure rechazaba la conexión del certificado.
 *   **Solución:** Se identificó que Application Gateway no admite la entrada de contraseñas de certificados al importarlos dinámicamente desde Key Vault. Se modificó el script `generate-intranet-certs.sh` para empaquetar el certificado PFX con contraseña vacía (`-passout "pass:"`) y se configuró una identidad administrada asignada por el usuario (`id-privintra-lab-001-appgw`) con el rol de `Key Vault Secrets User` para otorgar acceso de lectura de forma nativa al Gateway.
 
+### 8.4 Migración a Topología Hub-and-Spoke Pura (Eliminación de Peerings Directos)
+*   **Problema (Commit `8db3127`):** El diseño inicial empleaba cuatro peerings directos inter-spoke (Spoke 1 ↔ Spoke 2 y Spoke 2 ↔ Spoke 3) para el tráfico transaccional. Aunque funcional, esta solución rompe la topología Hub-and-Spoke canónica, dispersa el control de enrutamiento y no ofrece un punto único donde insertar inspección o filtrado del tráfico este-oeste.
+*   **Solución:** Se eliminaron los peerings directos y se desplegó una NVA (Network Virtual Appliance) Linux en la subred de administración del Hub (`10.10.4.100`) con reenvío IP habilitado. En cada Spoke se asociaron tablas de ruta (UDR) sobre las subredes de origen (integración de App Services, MySQL delegada y subredes de ETL/Dashboard), con rutas que apuntan los CIDR de los spokes remotos al *next-hop* `VirtualAppliance` (la NVA). El tráfico inter-spoke ahora transita íntegramente por el Hub. Las IPs de la NVA y los espacios de direcciones se inyectan a cada módulo de Spoke vía variables, y se añadió el proveedor `hashicorp/time` requerido por el módulo del Hub.
+
+### 8.5 Carrera de Propagación de RBAC en Key Vault
+*   **Problema (Commit `8db3127`):** Inmediatamente después de `terraform apply`, la asignación de rol RBAC (`Key Vault Secrets Officer`) sobre el Key Vault aún no se había propagado en Azure AD (la propagación puede tardar hasta ~60 s). Esto provocaba que la carga del secreto del certificado y la inicialización del Application Gateway fallaran de forma intermitente al no poder leer el secreto recién autorizado.
+*   **Solución:** Se introdujo un recurso `time_sleep.wait_for_kv_rbac` con `create_duration = "60s"` que depende de la asignación de rol. Tanto el secreto del certificado (`azurerm_key_vault_secret.appgw_cert`) como el Application Gateway dependen ahora de esta espera, garantizando que el RBAC esté propagado antes de consumir el Key Vault.
+
+### 8.6 Error de Conversión en el Callback TLS del Script de Diagnóstico
+*   **Problema (Commit `ce6225e`):** El script PowerShell de diagnóstico ejecutado desde la Jumpbox fallaba al validar los endpoints HTTPS internos por un error de *cast* en el callback de validación del certificado TLS, abortando las pruebas de conectividad.
+*   **Solución:** Se corrigió la conversión de tipos del callback `ServerCertificateValidationCallback` para que la validación TLS personalizada se ejecute correctamente, permitiendo que el diagnóstico de HTTPS interno (a través del Application Gateway con certificado auto-firmado) complete sin errores.
+
 ---
 
 ## 9. Automatización del Despliegue
 
 El proyecto cuenta con un script orquestador (`scripts/deploy-full.sh`) que unifica todo el ciclo de vida del despliegue en una sola ejecución. El flujo automatizado sigue estas fases:
 
-1. **Compilación de paquetes prebuilt:** Construye los ZIPs de las cuatro aplicaciones de Spoke 1 con sus dependencias instaladas.
-2. **Terraform init / plan / apply:** Inicializa el backend remoto, genera el plan de ejecución y lo aplica con reintentos automáticos y control de lock.
-3. **Diagnósticos desde la Jumpbox:** Se conecta a la máquina Jumpbox del Hub mediante `az vm run-command` para ejecutar un script PowerShell que valida la conectividad DNS, HTTPS, MySQL y Blob Storage desde dentro de la red privada. Si alguna prueba falla, el despliegue se detiene antes de poblar datos.
-4. **Post-deploy de datos:** Ejecuta los scripts SQL de inicialización de bases de datos y carga las imágenes de productos al Blob Storage privado mediante la Jumpbox como punto de entrada.
+1. **Generación de certificados TLS:** Antes del plan, verifica si existen los certificados de intranet (`cert-northwind-lab.pfx` y `ca.crt`) en `terraform/.vpn-certs/`. Si faltan, ejecuta automáticamente `generate-intranet-certs.sh` (requeridos por el Application Gateway y el Key Vault), evitando fallos por certificados ausentes.
+2. **Compilación de paquetes prebuilt:** Construye los ZIPs de las cuatro aplicaciones de Spoke 1 con sus dependencias instaladas.
+3. **Terraform init / plan / apply:** Inicializa el backend remoto, genera el plan de ejecución y lo aplica con reintentos automáticos y control de lock. Si Terraform detecta recursos que ya existen en Azure (error *"already exists - to be managed via Terraform this resource needs to be imported"*), la función `run_terraform_import_all` extrae los candidatos y los importa automáticamente al estado en lugar de abortar por conflicto.
+4. **Diagnósticos desde la Jumpbox:** Se conecta a la máquina Jumpbox del Hub mediante `az vm run-command` para ejecutar un script PowerShell que valida la conectividad DNS, HTTPS, MySQL y Blob Storage desde dentro de la red privada. Si alguna prueba falla, el despliegue se detiene antes de poblar datos.
+5. **Post-deploy de datos:** Ejecuta los scripts SQL de inicialización de bases de datos y carga las imágenes de productos al Blob Storage privado mediante la Jumpbox como punto de entrada.
 
 Este enfoque permite que cualquier integrante del equipo reproduzca el despliegue completo con un solo comando, reduciendo errores manuales y garantizando la validación de infraestructura antes de poblar datos de producción.
+
+### 9.1 Scripts Auxiliares de Operación
+El proyecto incluye además scripts de apoyo para la operación cotidiana del entorno privado:
+*   **`scripts/download-vpn-config.sh`:** Descarga y prepara el perfil de cliente VPN Point-to-Site (OpenVPN) a partir del paquete generado por el VPN Gateway, dejándolo listo para importar en el cliente local.
+*   **`scripts/download-diag-logs.sh`:** Recupera los registros de diagnóstico generados por la Jumpbox del Hub para su análisis local, facilitando la depuración de problemas de conectividad sin necesidad de sesión interactiva.
