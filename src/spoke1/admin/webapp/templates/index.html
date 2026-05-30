@@ -219,6 +219,7 @@
                     
                     <input type="file" id="changeDocInput_${emp.id}" style="display:none;" accept=".pdf" onchange="uploadNewDocument(${emp.id})">
                     <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 8px; margin-left: 8px;" onclick="document.getElementById('changeDocInput_${emp.id}').click()">Subir/Cambiar Doc</button>
+                    ${emp.document_url ? `<a href="${emp.document_url.startsWith('/') ? API_BASE_URL.replace('/api', '') + emp.document_url : emp.document_url}" target="_blank" class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 8px; margin-left: 8px; text-decoration:none;">Ver Documento</a>` : ''}
                 </div>
                 <h2 style="margin-bottom:8px;">${emp.first_name} ${emp.last_name}</h2>
                 <div style="color: #2563eb; font-weight:600; font-size:1.1rem; margin-bottom:4px;">${emp.position}</div>
@@ -288,11 +289,49 @@
         }
 
         async function uploadNewPicture(empId) {
-            // omitted for brevity
+            const input = document.getElementById(`changePicInput_${empId}`);
+            const file = input.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('profile_picture', file);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/employees/${empId}/picture`, {
+                    method: 'PATCH',
+                    body: formData
+                });
+                if (!response.ok) throw new Error('Error al subir foto');
+                const updated = await response.json();
+                document.getElementById('profileModal').classList.remove('active');
+                fetchEmployees();
+                alert('Foto actualizada correctamente.');
+            } catch (e) {
+                alert('Hubo un error al actualizar la foto.');
+            }
         }
 
         async function uploadNewDocument(empId) {
-            // omitted for brevity
+            const input = document.getElementById(`changeDocInput_${empId}`);
+            const file = input.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('document', file);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/employees/${empId}/document`, {
+                    method: 'PATCH',
+                    body: formData
+                });
+                if (!response.ok) throw new Error('Error al subir documento');
+                const updated = await response.json();
+                document.getElementById('profileModal').classList.remove('active');
+                fetchEmployees();
+                alert('Documento actualizado correctamente.');
+            } catch (e) {
+                alert('Hubo un error al actualizar el documento.');
+            }
         }
 
         async function toggleStatus(empId) {
