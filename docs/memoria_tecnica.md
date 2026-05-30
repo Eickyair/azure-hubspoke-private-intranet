@@ -15,6 +15,7 @@
 | --- | --- | --- | --- |
 | 1.0 | 25/05/2026 | Versión inicial de la memoria técnica del proyecto. | Erick Aguilar, Carlos E. Mendoza H., Alan Magno |
 | 1.1 | 29/05/2026 | Migración de peerings directos inter-spoke a topología Hub-and-Spoke pura con NVA de tránsito y tablas de ruta (UDR); resolución de carrera de propagación RBAC en Key Vault; automatización de certificados e importación de recursos en el script de despliegue; actualización del modelo de costos. | Erick Aguilar, Carlos E. Mendoza H., Alan Magno |
+| 1.2 | 30/05/2026 | Reconciliación del modelo de costos con la calculadora autoritativa (`tfplan.json` + Azure Retail Prices API): VMs IaaS tasadas con el meter real `Bsv2` de East US (mexicocentral no lo publica); PAYG actualizado a $858.49/mes y recálculo de las estrategias de optimización. | Erick Aguilar, Carlos E. Mendoza H., Alan Magno |
 
 ### Perfil del Equipo de Trabajo
 
@@ -262,23 +263,24 @@ Para asegurar la viabilidad económica de la plataforma durante los próximos 3 
 
 ### 7.1 Estimación de Costo Mensual Detallado (Pago por Uso - PAYG)
 
+Los importes provienen de la calculadora de costos del proyecto (`Calculadora__Azure(1).ipynb`), que consulta el Azure Retail Prices API a partir del plan de Terraform (`tfplan.json`). **Nota de tasación:** la región `mexicocentral` no publica precios para la serie `Bsv2` (`B4s_v2`/`B2ls_v2`) en el API retail; por ello las VMs IaaS se tasan con el meter `Bsv2` real de East US (precio idéntico en eastus/eastus2/westus2), mientras el resto de recursos usa `mexicocentral`.
+
 | Recurso de Azure | SKU / Dimensionamiento | Cantidad | Costo Unitario / Mes | Costo Total / Mes |
 | --- | --- | --- | --- | --- |
-| **Azure VPN Gateway P2S** | `VpnGw1AZ` | 1 | $138.70 | $138.70 |
-| **Azure Bastion** | Standard SKU (base 2 instances) | 1 | $138.70 | $138.70 |
-| **Application Gateway WAF** | `WAF_v2` (1 instance capacity) | 1 | $115.00 | $115.00 |
-| **App Service Plan** | Linux `B1` (Basic compute) | 1 | $12.41 | $12.41 |
-| **App Services (WebApps/APIs)**| 4 aplicaciones montadas en el mismo Plan B1 | - | Incluido | $0.00 |
-| **MySQL Flexible Servers** | `B_Standard_B1ms` (1 vCPU, 2GB) + 20GB | 3 | $12.34 | $37.02 |
-| **Jumpbox Windows VM** | `Standard_B4s_v2` (4 vCPU, 16GB RAM) | 1 | $124.10 | $124.10 |
-| **NVA de Tránsito Inter-Spoke** | `Standard_B4s_v2` (4 vCPU, 16GB RAM) | 1 | $124.10 | $124.10 |
-| **DNS Forwarder VM** | `Standard_B2ls_v2` (2 vCPU, 4GB RAM) | 1 | $16.50 | $16.50 |
-| **ETL Linux VM** | `Standard_B2ls_v2` (2 vCPU, 4GB RAM) | 1 | $16.50 | $16.50 |
-| **Dashboard Linux VM** | `Standard_B2ls_v2` (2 vCPU, 4GB RAM) | 1 | $16.50 | $16.50 |
-| **Managed Disks (OS)** | 1x127GB Standard SSD (Jumpbox) + 4x32GB Standard SSD (NVA, DNS, ETL, Dashboard) | 5 | - | $12.99 |
-| **Direcciones IP Públicas** | Static IPs (Bastion, VPN, AppGw) | 3 | $2.63 | $7.89 |
-| **Log Analytics & Storage** | Transacciones de red, almacenamiento básico | - | Estimado | $7.00 |
-| **Total Mensual (PAYG)** | | | | $667.41 |
+| **Azure Bastion** | Standard | 1 | $211.70 | $211.70 |
+| **Azure VPN Gateway P2S** | `VpnGw1AZ` (facturado como `VpnGw1`) | 1 | $138.70 | $138.70 |
+| **Jumpbox Windows VM** | `Standard_B4s_v2` (4 vCPU, 16GB RAM) | 1 | $135.05 | $135.05 |
+| **NVA de Tránsito Inter-Spoke** | `Standard_B4s_v2` (4 vCPU, 16GB RAM) | 1 | $121.18 | $121.18 |
+| **Application Gateway WAF** | `WAF_v2` (Medium, 1 CU) | 1 | $101.18 | $101.18 |
+| **DNS Forwarder VM** | `Standard_B2ls_v2` (2 vCPU, 4GB RAM) | 1 | $30.37 | $30.37 |
+| **ETL Linux VM** | `Standard_B2ls_v2` (2 vCPU, 4GB RAM) | 1 | $30.37 | $30.37 |
+| **Dashboard Linux VM** | `Standard_B2ls_v2` (2 vCPU, 4GB RAM) | 1 | $30.37 | $30.37 |
+| **App Service Plan** | Linux `B1` — 4 WebApps/APIs comparten el plan | 1 | $13.65 | $13.65 |
+| **MySQL Flexible Servers** | `B_Standard_B1ms` (1 vCPU, 2GB) | 3 | $13.65 | $40.95 |
+| **Storage Accounts** | Hot LRS (paquetes + documentos) | 2 | $2.10 | $4.20 |
+| **Log Analytics** | Auxiliary Logs | 1 | $0.60 | $0.60 |
+| **Key Vault Operations** | Standard | 1 | $0.17 | $0.17 |
+| **Total Mensual (PAYG)** | | | | $858.49 |
 
 ---
 
@@ -289,15 +291,15 @@ Dado que esta es una intranet académica / corporativa con horario de oficina (L
 *   **Recursos Afectados:** Jumpbox Windows (`Standard_B4s_v2`), NVA de Tránsito (`Standard_B4s_v2`), DNS Forwarder, ETL VM y Dashboard Streamlit VM. La NVA se incluye en el apagado 8x5 porque los flujos de datos inter-spoke (consultas de las APIs a MySQL, extracción del ETL) solo ocurren en horario de oficina.
 *   **Patrón de Uso:** Reducción de 730 horas/mes a 220 horas/mes (aproximadamente un 30% del tiempo encendido).
 *   **Ahorro Mensual Computado:**
-    *   Costo compute VM sin apagar: $297.70/mes.
-    *   Costo compute VM con apagado 8x5 (30.1%): $89.61/mes.
-    *   Ahorro mensual obtenido: $208.09/mes (reducción del 31.2% sobre la factura total).
+    *   Costo compute VM sin apagar: $347.34/mes.
+    *   Costo compute VM con apagado 8x5 (220/730 h = 30.1%): $104.68/mes.
+    *   Ahorro mensual obtenido: $242.66/mes (reducción del 28.3% sobre la factura total).
 
 #### 2. Adquisición de Instancias Reservadas (RI) a 3 Años
 Para los servicios que requieren disponibilidad constante 24/7, el esquema de reserva a 3 años proporciona descuentos de hasta el 50% sobre el coste de computación habitual.
 *   **Recursos Afectados por RI:**
-    *   **App Service Plan (B1 Linux):** Descuento del 35% en compute. Costo de $12.41/mes a $8.06/mes.
-    *   **MySQL Flexible Servers (3 x B1ms):** Descuento del 45% en compute. Costo de compute de $30.12/mes a $16.56/mes (el almacenamiento de $6.90/mes no se descuenta).
+    *   **App Service Plan (B1 Linux):** Descuento del 35% en compute. Costo de $13.65/mes a $8.87/mes.
+    *   **MySQL Flexible Servers (3 x B1ms):** Descuento del 45% en compute. Costo de $40.95/mes a $22.52/mes.
 *   **Recursos que no soportan RI o no conviene reservar:**
     *   VPN Gateway y Application Gateway WAF (no aplican para RI standard).
     *   Máquinas Virtuales con apagado programado: Es financieramente más ventajoso apagar las VMs 8x5 (70% de ahorro) que contratar una reservación a 3 años (que ofrece entre 55% y 60% de descuento pero nos obliga a pagar la VM esté o no encendida).
@@ -306,9 +308,9 @@ Para los servicios que requieren disponibilidad constante 24/7, el esquema de re
 
 | Estrategia | Detalle Mensual | Costo Mensual Promedio | Costo Total (36 Meses) | Ahorro Total |
 | --- | --- | --- | --- | --- |
-| **Opción A: PAYG Puro (Sin Optimizar)** | Recursos corriendo 24/7 sin descuentos. | $667.41 | $24,026.76 | $0.00 (Base) |
-| **Opción B: Solo Reservaciones a 3 Años** | Reserva de cómputo para todas las VMs, bases de datos y App Services. | $494.70 | $17,809.20 | $6,217.56 (25.9%) |
-| **Opción C: Estrategia Mixta (Recomendada)** | RI a 3 años en bases de datos y App Service Plan + Apagado 8x5 en Máquinas Virtuales. | $441.41 | $15,890.76 | $8,136.00 (33.9%) |
+| **Opción A: PAYG Puro (Sin Optimizar)** | Recursos corriendo 24/7 sin descuentos. | $858.49 | $30,905.64 | $0.00 (Base) |
+| **Opción B: Solo Reservaciones a 3 Años** | Reserva de cómputo para todas las VMs, bases de datos y App Services. | $644.19 | $23,190.84 | $7,714.80 (25.0%) |
+| **Opción C: Estrategia Mixta (Recomendada)** | RI a 3 años en bases de datos y App Service Plan + Apagado 8x5 en Máquinas Virtuales. | $592.62 | $21,334.32 | $9,571.32 (31.0%) |
 
 Decisión Técnica Justificada: Se adopta la Opción C (Estrategia Mixta). Al apagar las VMs de analítica y pruebas durante las noches y fines de semana obtenemos un ahorro masivo sin penalizar la disponibilidad transaccional, mientras que el núcleo de la base de datos y la aplicación se benefician de la tarifa reducida por reserva a 3 años.
 
