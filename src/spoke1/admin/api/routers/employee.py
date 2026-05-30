@@ -40,16 +40,18 @@ async def create_employee(
     profile_blob = None
     document_blob = None
 
+    safe_email = email.replace("@", "_at_").replace(".", "_")
+
     if profile_picture:
         content = await profile_picture.read()
         extension = profile_picture.filename.split(".")[-1] if "." in profile_picture.filename else "jpg"
-        profile_blob = f"profile_{email}.{extension}"
+        profile_blob = f"profile_{safe_email}.{extension}"
         storage_service.upload_file(content, profile_blob, profile_picture.content_type)
-        
+
     if document:
         content = await document.read()
         extension = document.filename.split(".")[-1] if "." in document.filename else "pdf"
-        document_blob = f"doc_{email}.{extension}"
+        document_blob = f"doc_{safe_email}.{extension}"
         storage_service.upload_file(content, document_blob, document.content_type)
         
     employee_data = {
@@ -113,6 +115,12 @@ def download_blob(blob_name: str):
             content_type = "image/png"
         elif blob_name.endswith(".jpg") or blob_name.endswith(".jpeg"):
             content_type = "image/jpeg"
+        elif blob_name.endswith(".svg"):
+            content_type = "image/svg+xml"
+        elif blob_name.endswith(".webp"):
+            content_type = "image/webp"
+        elif blob_name.endswith(".gif"):
+            content_type = "image/gif"
         
         return Response(content=content, media_type=content_type)
     except Exception as e:

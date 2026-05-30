@@ -14,7 +14,7 @@
 }
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   background-color: var(--bg-color);
   background-image: 
     radial-gradient(at 0% 0%, hsla(253,16%,7%,0) 0, transparent 50%), 
