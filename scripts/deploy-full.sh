@@ -196,6 +196,24 @@ run_phase() {
   fi
 }
 
+run_generate_certs() {
+  local cert_pfx="$TERRAFORM_DIR/.vpn-certs/cert-northwind-lab.pfx"
+  local cert_ca="$TERRAFORM_DIR/.vpn-certs/ca.crt"
+
+  if [[ -f "$cert_pfx" && -f "$cert_ca" ]]; then
+    log "Certificates already present at terraform/.vpn-certs/; skipping generation."
+    return 0
+  fi
+
+  if ! command -v openssl >/dev/null 2>&1; then
+    error "openssl not found. Install it or generate certs manually with scripts/generate-intranet-certs.sh."
+    exit 1
+  fi
+
+  log "Certificate files not found — generating intranet TLS certs (required by App Gateway + Key Vault)."
+  bash "$ROOT_DIR/scripts/generate-intranet-certs.sh"
+}
+
 run_build() {
   bash "$ROOT_DIR/scripts/build-spoke1-prebuilts.sh"
 }
@@ -218,6 +236,53 @@ is_retryable_terraform_apply_error() {
   grep -q 'AnotherOperationInProgress' "$output_file"
 }
 
+is_already_exists_error() {
+  local output_file="$1"
+
+  grep -q 'already exists - to be managed via Terraform this resource needs to be imported' "$output_file"
+}
+
+extract_import_candidates() {
+  local output_file="$1"
+
+  python3 - "$output_file" <<'PYEOF'
+import re, sys
+
+with open(sys.argv[1]) as f:
+    lines = f.readlines()
+
+i = 0
+while i < len(lines):
+    id_match = re.search(r'"([^"]+)"\s+already exists', lines[i])
+    if id_match:
+        resource_id = id_match.group(1)
+        for j in range(i + 1, min(i + 8, len(lines))):
+            addr_match = re.search(r'\bwith\s+([\w.]+(?:\[\d+\])?(?:\.[\w]+(?:\[\d+\])?)*)\s*,', lines[j])
+            if addr_match:
+                print(f"{addr_match.group(1)}|{resource_id}")
+                i = j
+                break
+        else:
+            i += 1
+    else:
+        i += 1
+PYEOF
+}
+
+run_terraform_import_all() {
+  local candidates="$1"
+  local address id
+
+  while IFS='|' read -r address id; do
+    [[ -z "$address" || -z "$id" ]] && continue
+    log "Importing drifted resource: $address"
+    terraform -chdir="$TERRAFORM_DIR" import \
+      -var-file="$TFVARS_FILE" \
+      -input=false \
+      "$address" "$id"
+  done <<<"$candidates"
+}
+
 run_terraform_apply() {
   local attempt=1
   local output_file
@@ -236,6 +301,28 @@ run_terraform_apply() {
     if [[ $rc -eq 0 ]]; then
       rm -f "$output_file"
       return 0
+    fi
+
+    if is_already_exists_error "$output_file"; then
+      local candidates
+      candidates="$(extract_import_candidates "$output_file")"
+      if [[ -n "$candidates" ]]; then
+        if (( attempt == TERRAFORM_APPLY_MAX_ATTEMPTS )); then
+          error "Drifted resources detected but max attempts (${TERRAFORM_APPLY_MAX_ATTEMPTS}) reached; run 'terraform import' manually."
+          rm -f "$output_file"
+          return $rc
+        fi
+        warn "Drifted resources on attempt ${attempt}/${TERRAFORM_APPLY_MAX_ATTEMPTS}; importing and re-planning before retry."
+        if run_terraform_import_all "$candidates"; then
+          run_terraform_plan
+        else
+          error "terraform import failed; resolve the drift manually before re-running."
+          rm -f "$output_file"
+          return 1
+        fi
+        attempt=$((attempt + 1))
+        continue
+      fi
     fi
 
     if ! is_retryable_terraform_apply_error "$output_file"; then
@@ -457,6 +544,8 @@ esac
 
 require_prerequisites
 check_resource_group_state
+
+run_phase "generate-certs" run_generate_certs
 
 if [[ "$SKIP_BUILD" == false ]]; then
   run_phase "build-prebuilts" run_build

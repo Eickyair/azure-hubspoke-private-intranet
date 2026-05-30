@@ -6,6 +6,26 @@ __pycache__/
 
 # Generated documentation artifacts
 docs/*.pdf
+!docs/documento_tecnico.pdf
+
+# LaTeX compilation artifacts
+docs/*.tex
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.lof
+docs/*.lot
+docs/*.fls
+docs/*.fdb_latexmk
+docs/*.synctex.gz
+docs/*.bbl
+docs/*.blg
+docs/*.nav
+docs/*.snm
+docs/*.vrb
+docs/*.bcf
+docs/*.run.xml
 
 # Terraform local artifacts
 terraform/.terraform/
@@ -27,8 +47,14 @@ azure-hubspoke-private-intranet.code-workspace
 # Agents
 .agents
 
-# VPN certificates
+# Azure cost calculator outputs
+outputs/
+*.ipynb
+
+# VPN certificates and generated configs
 vpn-certs/
+vpn-config/
+.vpn-certs/
 
 BASE.VPN.md
 walkthrough.md
