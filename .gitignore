@@ -49,7 +49,7 @@ azure-hubspoke-private-intranet.code-workspace
 
 # Azure cost calculator outputs
 outputs/
-*.ipynb
+# *.ipynb
 # Terraform plan exported as JSON, consumed by the cost calculator
 tfplan.json
 
