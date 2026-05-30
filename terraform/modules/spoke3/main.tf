@@ -36,6 +36,37 @@ resource "azurerm_subnet" "mysql" {
   }
 }
 
+resource "azurerm_route_table" "spoke" {
+  name                = "rt-${var.name_prefix}-spoke3"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  route {
+    name                   = "to-spoke1-via-nva"
+    address_prefix         = var.spoke1_address_space
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = var.hub_nva_ip
+  }
+
+  route {
+    name                   = "to-spoke2-via-nva"
+    address_prefix         = var.spoke2_address_space
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = var.hub_nva_ip
+  }
+}
+
+resource "azurerm_subnet_route_table_association" "etl" {
+  subnet_id      = azurerm_subnet.etl.id
+  route_table_id = azurerm_route_table.spoke.id
+}
+
+resource "azurerm_subnet_route_table_association" "dashboard" {
+  subnet_id      = azurerm_subnet.dashboard.id
+  route_table_id = azurerm_route_table.spoke.id
+}
+
 resource "azurerm_virtual_network_peering" "hub_to_spoke" {
   name                         = "peer-hub-to-spoke3-analytics"
   resource_group_name          = var.resource_group_name
@@ -337,6 +368,7 @@ locals {
   dashboard_env = {
     SERVICE_NAME             = "dashboard-kpi-01"
     ETL_HEALTH_URL           = "http://${var.config.etl_private_ip}:8000/health"
+    ETL_RUN_URL              = "http://${var.config.etl_private_ip}:8000/run"
     MYSQL_APP_HOST           = var.upstream_databases.app_host
     MYSQL_APP_DATABASE       = var.upstream_databases.app_database
     MYSQL_APP_USER           = var.mysql_administrator_login

@@ -82,3 +82,18 @@ variable "hub_management_subnet_prefix" {
   type        = string
   description = "CIDR del hub management subnet (Jumpbox). Permite MySQL inbound para administración."
 }
+
+variable "hub_nva_ip" {
+  type        = string
+  description = "IP privada del NVA en hub para enrutar tráfico inter-spoke."
+}
+
+variable "spoke1_address_space" {
+  type        = string
+  description = "CIDR del VNet de spoke1. Se usa para UDR inter-spoke."
+}
+
+variable "spoke3_address_space" {
+  type        = string
+  description = "CIDR del VNet de spoke3. Se usa para UDR inter-spoke."
+}

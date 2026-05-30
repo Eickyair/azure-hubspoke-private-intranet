@@ -292,6 +292,32 @@ resource "azurerm_subnet_network_security_group_association" "private_endpoint" 
   network_security_group_id = azurerm_network_security_group.private_endpoint.id
 }
 
+resource "azurerm_route_table" "spoke" {
+  name                = "rt-${var.name_prefix}-spoke1"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  route {
+    name                   = "to-spoke2-via-nva"
+    address_prefix         = var.spoke2_address_space
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = var.hub_nva_ip
+  }
+
+  route {
+    name                   = "to-spoke3-via-nva"
+    address_prefix         = var.spoke3_address_space
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = var.hub_nva_ip
+  }
+}
+
+resource "azurerm_subnet_route_table_association" "app_service_integration" {
+  subnet_id      = azurerm_subnet.app_service_integration.id
+  route_table_id = azurerm_route_table.spoke.id
+}
+
 resource "azurerm_virtual_network_peering" "hub_to_spoke" {
   name                         = "peer-hub-to-spoke1-app"
   resource_group_name          = var.resource_group_name

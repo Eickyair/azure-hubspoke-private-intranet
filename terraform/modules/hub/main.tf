@@ -164,6 +164,13 @@ resource "azurerm_role_assignment" "deployer_kv_secrets_officer" {
   principal_id         = data.azurerm_client_config.current.object_id
 }
 
+# Azure RBAC puede tardar hasta 60 s en propagarse. Sin esta espera el App Gateway
+# falla al cargar el cert SSL desde Key Vault justo despues del apply.
+resource "time_sleep" "wait_for_kv_rbac" {
+  depends_on      = [azurerm_role_assignment.deployer_kv_secrets_officer]
+  create_duration = "60s"
+}
+
 resource "azurerm_key_vault_secret" "appgw_cert" {
   name         = "cert-northwind-lab"
   value        = filebase64("${path.module}/../../.vpn-certs/cert-northwind-lab.pfx")
@@ -171,7 +178,7 @@ resource "azurerm_key_vault_secret" "appgw_cert" {
   content_type = "application/x-pkcs12"
 
   depends_on = [
-    azurerm_role_assignment.deployer_kv_secrets_officer
+    time_sleep.wait_for_kv_rbac
   ]
 }
 
@@ -413,6 +420,7 @@ resource "azurerm_application_gateway" "main" {
 
   depends_on = [
     azurerm_subnet.management,
+    time_sleep.wait_for_kv_rbac,
     azurerm_role_assignment.appgw_kv_secrets_user
   ]
 
@@ -640,6 +648,100 @@ resource "azurerm_network_interface_security_group_association" "dns" {
   count                     = var.config.enable_vpn_gateway ? 1 : 0
   network_interface_id      = azurerm_network_interface.dns[0].id
   network_security_group_id = azurerm_network_security_group.dns[0].id
+}
+
+# ── NVA: enruta tráfico inter-spoke a través del hub ────────────────────────
+resource "azurerm_network_security_group" "nva" {
+  name                = "nsg-${var.name_prefix}-hub-nva"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  security_rule {
+    name                       = "AllowSpokeTransit"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "10.0.0.0/8"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_network_interface" "nva" {
+  name                 = "nic-${var.name_prefix}-hub-nva"
+  location             = var.location
+  resource_group_name  = var.resource_group_name
+  ip_forwarding_enabled = true
+  tags                 = var.tags
+
+  ip_configuration {
+    name                          = "ipconfig1"
+    subnet_id                     = azurerm_subnet.management.id
+    private_ip_address_allocation = "Static"
+    private_ip_address            = "10.10.4.100"
+  }
+}
+
+resource "azurerm_network_interface_security_group_association" "nva" {
+  network_interface_id      = azurerm_network_interface.nva.id
+  network_security_group_id = azurerm_network_security_group.nva.id
+}
+
+resource "random_password" "nva" {
+  length      = 20
+  special     = true
+  min_upper   = 2
+  min_lower   = 2
+  min_numeric = 2
+  min_special = 2
+}
+
+resource "azurerm_linux_virtual_machine" "nva" {
+  name                            = "vm-${var.name_prefix}-nva-01"
+  resource_group_name             = var.resource_group_name
+  location                        = var.location
+  size                            = "Standard_B4s_v2"
+  admin_username                  = "nvaadmin"
+  admin_password                  = random_password.nva.result
+  disable_password_authentication = false
+  network_interface_ids           = [azurerm_network_interface.nva.id]
+  tags                            = var.tags
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  custom_data = base64encode(<<-EOF
+    #!/bin/bash
+    echo 'net.ipv4.ip_forward = 1' > /etc/sysctl.d/99-nva.conf
+    sysctl -p /etc/sysctl.d/99-nva.conf
+    iptables -P FORWARD ACCEPT
+    (crontab -l 2>/dev/null; echo "@reboot /sbin/iptables -P FORWARD ACCEPT") | crontab -
+    EOF
+  )
 }
 
 resource "azurerm_linux_virtual_machine" "dns" {

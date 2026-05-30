@@ -147,6 +147,10 @@ module "spoke2" {
   spoke3_dashboard_subnet_prefix   = var.spoke3.dashboard_subnet_prefix
   hub_management_subnet_prefix     = var.hub.management_subnet_prefix
 
+  hub_nva_ip           = module.hub.nva_private_ip
+  spoke1_address_space = var.spoke1.address_space[0]
+  spoke3_address_space = var.spoke3.address_space[0]
+
   depends_on = [module.hub]
 }
 
@@ -180,6 +184,10 @@ module "spoke3" {
     admin_host     = module.spoke2.mysql_admin_fqdn
     admin_database = module.spoke2.mysql_admin_database_name
   }
+
+  hub_nva_ip           = module.hub.nva_private_ip
+  spoke1_address_space = var.spoke1.address_space[0]
+  spoke2_address_space = var.spoke2.address_space[0]
 
   depends_on = [module.hub, module.spoke2]
 }
@@ -225,56 +233,11 @@ module "spoke1" {
     storage_container        = module.spoke2.storage_container_name
   }
 
+  hub_nva_ip           = module.hub.nva_private_ip
+  spoke2_address_space = var.spoke2.address_space[0]
+  spoke3_address_space = var.spoke3.address_space[0]
+
   depends_on = [module.hub, module.spoke2]
-}
-
-# Peerings directos entre spokes para flujos privados que no pueden transitar por el hub.
-resource "azurerm_virtual_network_peering" "spoke1_to_spoke2" {
-  name                         = "peer-spoke1-app-to-spoke2-data"
-  resource_group_name          = azurerm_resource_group.main.name
-  virtual_network_name         = "vnet-${local.name_prefix}-spoke1-app"
-  remote_virtual_network_id    = module.spoke2.vnet_id
-  allow_virtual_network_access = true
-  allow_forwarded_traffic      = false
-  use_remote_gateways          = false
-
-  depends_on = [module.spoke1, module.spoke2]
-}
-
-resource "azurerm_virtual_network_peering" "spoke2_to_spoke1" {
-  name                         = "peer-spoke2-data-to-spoke1-app"
-  resource_group_name          = azurerm_resource_group.main.name
-  virtual_network_name         = "vnet-${local.name_prefix}-spoke2-data"
-  remote_virtual_network_id    = module.spoke1.vnet_id
-  allow_virtual_network_access = true
-  allow_forwarded_traffic      = false
-  use_remote_gateways          = false
-
-  depends_on = [module.spoke1, module.spoke2]
-}
-
-resource "azurerm_virtual_network_peering" "spoke2_to_spoke3" {
-  name                         = "peer-spoke2-data-to-spoke3-analytics"
-  resource_group_name          = azurerm_resource_group.main.name
-  virtual_network_name         = "vnet-${local.name_prefix}-spoke2-data"
-  remote_virtual_network_id    = module.spoke3.vnet_id
-  allow_virtual_network_access = true
-  allow_forwarded_traffic      = false
-  use_remote_gateways          = false
-
-  depends_on = [module.spoke2, module.spoke3]
-}
-
-resource "azurerm_virtual_network_peering" "spoke3_to_spoke2" {
-  name                         = "peer-spoke3-analytics-to-spoke2-data"
-  resource_group_name          = azurerm_resource_group.main.name
-  virtual_network_name         = "vnet-${local.name_prefix}-spoke3-analytics"
-  remote_virtual_network_id    = module.spoke2.vnet_id
-  allow_virtual_network_access = true
-  allow_forwarded_traffic      = false
-  use_remote_gateways          = false
-
-  depends_on = [module.spoke2, module.spoke3]
 }
 
 # ── Script de diagnóstico renderizado con todos los endpoints ────

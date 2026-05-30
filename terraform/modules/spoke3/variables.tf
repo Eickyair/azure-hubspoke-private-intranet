@@ -102,3 +102,18 @@ variable "vpn_client_address_prefixes" {
   default     = []
   description = "Lista de prefijos de red para clientes VPN P2S."
 }
+
+variable "hub_nva_ip" {
+  type        = string
+  description = "IP privada del NVA en hub para enrutar tráfico inter-spoke."
+}
+
+variable "spoke1_address_space" {
+  type        = string
+  description = "CIDR del VNet de spoke1. Se usa para UDR inter-spoke."
+}
+
+variable "spoke2_address_space" {
+  type        = string
+  description = "CIDR del VNet de spoke2. Se usa para UDR inter-spoke."
+}

@@ -102,6 +102,32 @@ resource "azurerm_subnet" "private_endpoint" {
   private_endpoint_network_policies = "Disabled"
 }
 
+resource "azurerm_route_table" "spoke" {
+  name                = "rt-${var.name_prefix}-spoke2"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+
+  route {
+    name                   = "to-spoke1-via-nva"
+    address_prefix         = var.spoke1_address_space
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = var.hub_nva_ip
+  }
+
+  route {
+    name                   = "to-spoke3-via-nva"
+    address_prefix         = var.spoke3_address_space
+    next_hop_type          = "VirtualAppliance"
+    next_hop_in_ip_address = var.hub_nva_ip
+  }
+}
+
+resource "azurerm_subnet_route_table_association" "mysql" {
+  subnet_id      = azurerm_subnet.mysql.id
+  route_table_id = azurerm_route_table.spoke.id
+}
+
 resource "azurerm_virtual_network_peering" "hub_to_spoke" {
   name                         = "peer-hub-to-spoke2-data"
   resource_group_name          = var.resource_group_name
