@@ -7,7 +7,25 @@
 $ErrorActionPreference = 'Continue'
 $ProgressPreference    = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = [System.Net.Security.RemoteCertificateValidationCallback]{ $true }
+
+# NOTA: NO usar un scriptblock de PS como ServerCertificateValidationCallback.
+# El callback TLS se invoca desde un thread de .NET que no tiene un Runspace de PS
+# disponible; el scriptblock lanza RunspaceNotAvailableException silenciosa y la
+# validacion devuelve false -> TLS falla con "An unexpected error occurred on a send."
+# Solucion: compilar un metodo estatico en C# que siempre devuelva true.
+if (-not ([System.Management.Automation.PSTypeName]'TrustAllCerts').Type) {
+    Add-Type -TypeDefinition @'
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+public static class TrustAllCerts {
+    public static bool Callback(object sender, X509Certificate certificate,
+                                X509Chain chain, SslPolicyErrors errors) { return true; }
+}
+'@
+}
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback =
+    [System.Net.Security.RemoteCertificateValidationCallback][TrustAllCerts]::Callback
 
 $DiagDir   = 'C:\diag'
 $Timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -253,18 +271,27 @@ function Get-MySQLClient {
 
 function Test-Http {
     param([string]$Url, [int]$TimeoutSec = 15)
+    # Invoke-WebRequest respeta el ServicePointManager global (SSL bypass ya fijado arriba),
+    # a diferencia de HttpClientHandler.ServerCertificateCustomValidationCallback que no existe
+    # en .NET Framework 4.x (PS 5.1) y lanzaba excepcion causando HTTP 0 en todos los checks HTTPS.
     try {
-        $handler = New-Object System.Net.Http.HttpClientHandler
-        $handler.ServerCertificateCustomValidationCallback = { $true }
-        $client = New-Object System.Net.Http.HttpClient($handler)
-        $client.Timeout = [System.TimeSpan]::FromSeconds($TimeoutSec)
-        $response = $client.GetAsync($Url).Result
-        $body = ''
-        if ($response.Content) {
-            $body = $response.Content.ReadAsStringAsync().Result
-            if ($body.Length -gt 300) { $body = $body.Substring(0, 300).Trim() }
+        $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+        $body = $resp.Content
+        if ($body -and $body.Length -gt 300) { $body = $body.Substring(0, 300).Trim() }
+        return [pscustomobject]@{ Ok = $true; Code = [int]$resp.StatusCode; Body = $body }
+    } catch [System.Net.WebException] {
+        $r = $_.Exception.Response
+        if ($null -ne $r) {
+            $code = [int]$r.StatusCode
+            try {
+                $reader = [System.IO.StreamReader]::new($r.GetResponseStream())
+                $body   = $reader.ReadToEnd()
+                $reader.Dispose()
+                if ($body.Length -gt 300) { $body = $body.Substring(0, 300) }
+            } catch { $body = '' }
+            return [pscustomobject]@{ Ok = ($code -lt 400); Code = $code; Body = $body }
         }
-        return [pscustomobject]@{ Ok = $response.IsSuccessStatusCode; Code = [int]$response.StatusCode; Body = $body }
+        return [pscustomobject]@{ Ok = $false; Code = 0; Body = $_.Exception.Message }
     } catch {
         $inner = $_.Exception
         while ($inner.InnerException) { $inner = $inner.InnerException }
@@ -291,19 +318,22 @@ function Test-BlobEndpoint {
     param([string]$BaseEndpoint)
     $uri = "$BaseEndpoint/?comp=list"
     try {
-        $handler = New-Object System.Net.Http.HttpClientHandler
-        $handler.ServerCertificateCustomValidationCallback = { $true }
-        $client = New-Object System.Net.Http.HttpClient($handler)
-        $client.Timeout = [System.TimeSpan]::FromSeconds(10)
-        $response = $client.GetAsync($uri).Result
-        $code = [int]$response.StatusCode
-        if ($code -in @(400, 401, 403, 409)) {
-            return [pscustomobject]@{ Ok = $true; Detail = "HTTP $code - endpoint alcanzable, autenticacion requerida (red CORRECTA)" }
-        }
-        if ($response.IsSuccessStatusCode) {
+        $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+        $code = [int]$resp.StatusCode
+        if ($resp.IsSuccessStatusCode -or $code -in @(200)) {
             return [pscustomobject]@{ Ok = $true; Detail = "HTTP $code - acceso anonimo (inesperado)" }
         }
-        return [pscustomobject]@{ Ok = $false; Detail = "HTTP $code - $($response.ReasonPhrase)" }
+        return [pscustomobject]@{ Ok = $false; Detail = "HTTP $code" }
+    } catch [System.Net.WebException] {
+        $r = $_.Exception.Response
+        if ($null -ne $r) {
+            $code = [int]$r.StatusCode
+            if ($code -in @(400, 401, 403, 409)) {
+                return [pscustomobject]@{ Ok = $true; Detail = "HTTP $code - endpoint alcanzable, autenticacion requerida (red CORRECTA)" }
+            }
+            return [pscustomobject]@{ Ok = $false; Detail = "HTTP $code - $($r.StatusDescription)" }
+        }
+        return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message }
     } catch {
         $inner = $_.Exception
         while ($inner.InnerException) { $inner = $inner.InnerException }
